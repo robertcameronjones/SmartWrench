@@ -1,0 +1,148 @@
+{
+  "case_id": "case_38219f690ee8656e",
+  "trigger_id": "trig_4d7f1dc73199",
+  "correlation_id": "corr_532cd1afcdcd",
+  "customer": {
+    "id": "cust_jones_robert",
+    "first_name": "Robert",
+    "last_name": "Jones",
+    "phone": "+13139095330",
+    "opt_status": "opted_in",
+    "preferred_channel": "voice",
+    "timezone": "America/Detroit"
+  },
+  "dealer": {
+    "id": "dealer_village_jeep_royal_oak",
+    "name": "Village Jeep",
+    "phone": "+12487813798",
+    "address": "31200 Woodward Ave, Royal Oak, MI 48073",
+    "ride_radius_miles": 10
+  },
+  "vehicle": {
+    "vin": "1C4RJFBG5NC123456",
+    "owner_id": "cust_jones_robert",
+    "year": 2025,
+    "make": "Jeep",
+    "model": "Grand Cherokee",
+    "odometer_miles": 32180,
+    "current_location": {
+      "latitude": 42.4895,
+      "longitude": -83.1446,
+      "description": "Owner's home, driveway"
+    }
+  },
+  "service_event": {
+    "type": "maintenance",
+    "summary": "oil change tire rotation and vehicle inspection",
+    "narrative": ""
+  },
+  "offered_slots": [
+    {
+      "id": "slot_2026_05_12_0830",
+      "starts_at": "2026-05-12T12:30:00Z",
+      "display": "Tuesday, May 12, 2026 - 8:30 AM"
+    },
+    {
+      "id": "slot_2026_05_12_1330",
+      "starts_at": "2026-05-12T17:30:00Z",
+      "display": "Tuesday, May 12, 2026 - 1:30 PM"
+    },
+    {
+      "id": "slot_2026_05_13_0900",
+      "starts_at": "2026-05-13T13:00:00Z",
+      "display": "Wednesday, May 13, 2026 - 9:00 AM"
+    }
+  ],
+  "state": "booked",
+  "attempt_count": 1,
+  "next_attempt_at": null,
+  "call_attempts": [
+    {
+      "attempt_number": 1,
+      "outcome": {
+        "result": "answered",
+        "business_outcome": "booked",
+        "booked_slot_id": "slot_chosen_data_collection_id='scheduled_date' value='20260513' json_schema=LiteralJsonSchemaProperty(type='string', description='The confirmed date of the service appointment in YYYYMMDD format.', enum=None, is_system_provided=False, dynamic_variable='', constant_value='') rationale='The agent confirmed the appointment for \"Wednesday, May thirteenth, at nine in the morning\" after the user selected \"Wednesday\", and the conversation occurred in 2026, making the full date 20260513.'_data_collection_id='scheduled_time' value='0900' json_schema=LiteralJsonSchemaProperty(type='string', description='The confirmed time of the service appointment in HHMM (24hour) format.', enum=None, is_system_provided=False, dynamic_variable='', constant_value='') rationale='The agent confirms the appointment for \"nine in the morning\" on Wednesday, May thirteenth, which translates to 0900 in HHMM format.'",
+        "elevenlabs_conversation_id": "conv_7201krbfpr10f28v5w4aj0bzhh57",
+        "started_at": "2026-05-11T12:20:33.274230Z",
+        "ended_at": "2026-05-11T12:22:11.866926Z",
+        "duration_seconds": 79.0,
+        "transcript": "[   1.0s] Customer: Hello.\n[   5.0s] Kate: Hi, this is Kate calling about your 2025 Jeep Grand Cherokee. Our system has detected that it needs service for maintenance. I'd love to help you get that scheduled at Village Jeep — does that work for you?\n[  18.0s] Customer: Yes.\n[  21.0s] Kate: [happy] Wonderful! We have a few openings for you. How about Tuesday, May twelfth, at eight thirty in the morning, or one thirty in the afternoon? We also have Wednesday, May thirteenth, at nine in the morning. Which of those times works best for your schedule?\n[  36.0s] Customer: One second.\n[  40.0s] Kate: [happy] Take your time. I'm here when you're ready.\n[  43.0s] Customer: Wednesday.\n[  53.0s] Kate: Great choice! I'll schedule your appointment for Wednesday, May thirteenth, at nine in the morning. Is there anything else I can assist you with today?\n[  62.0s] Customer: No thanks\n[  70.0s] Kate: [happy] Alright, your appointment is all set for Wednesday, May thirteenth, at nine in the morning. Thanks for calling, and have a wonderful day...",
+        "recording_url": "",
+        "error_detail": ""
+      }
+    }
+  ],
+  "events": [
+    {
+      "event_id": "evt_4777f83dba30",
+      "case_id": "case_38219f690ee8656e",
+      "correlation_id": "corr_532cd1afcdcd",
+      "attempt_number": null,
+      "timestamp": "2026-05-11T12:20:33.272999Z",
+      "source": "system",
+      "level": "info",
+      "event": "case.created",
+      "detail": "trigger=trig_4d7f1dc73199"
+    },
+    {
+      "event_id": "evt_f14d6630c62f",
+      "case_id": "case_38219f690ee8656e",
+      "correlation_id": "corr_532cd1afcdcd",
+      "attempt_number": null,
+      "timestamp": "2026-05-11T12:20:33.273908Z",
+      "source": "system",
+      "level": "info",
+      "event": "case.calling",
+      "detail": "attempt 1"
+    },
+    {
+      "event_id": "evt_ec4bbc5d8617",
+      "case_id": "case_38219f690ee8656e",
+      "correlation_id": "corr_532cd1afcdcd",
+      "attempt_number": 1,
+      "timestamp": "2026-05-11T12:20:33.274237Z",
+      "source": "system",
+      "level": "info",
+      "event": "call.dialing",
+      "detail": "+13139095330"
+    },
+    {
+      "event_id": "evt_9bdb5d9d65af",
+      "case_id": "case_38219f690ee8656e",
+      "correlation_id": "corr_532cd1afcdcd",
+      "attempt_number": 1,
+      "timestamp": "2026-05-11T12:20:33.687394Z",
+      "source": "elevenlabs",
+      "level": "info",
+      "event": "call.placed",
+      "detail": "conversation_id=conv_7201krbfpr10f28v5w4aj0bzhh57"
+    },
+    {
+      "event_id": "evt_5a00be2cbe6f",
+      "case_id": "case_38219f690ee8656e",
+      "correlation_id": "corr_532cd1afcdcd",
+      "attempt_number": 1,
+      "timestamp": "2026-05-11T12:22:11.867069Z",
+      "source": "elevenlabs",
+      "level": "info",
+      "event": "conversation.transcript_received",
+      "detail": "conversation_id=conv_7201krbfpr10f28v5w4aj0bzhh57 turns=10 duration=79.0s status=done"
+    },
+    {
+      "event_id": "evt_4fd83df28573",
+      "case_id": "case_38219f690ee8656e",
+      "correlation_id": "corr_532cd1afcdcd",
+      "attempt_number": null,
+      "timestamp": "2026-05-11T12:22:11.868493Z",
+      "source": "system",
+      "level": "info",
+      "event": "case.booked",
+      "detail": "booked slot slot_chosen_data_collection_id='scheduled_date' value='20260513' json_schema=LiteralJsonSchemaProperty(type='string', description='The confirmed date of the service appointment in YYYYMMDD format.', enum=None, is_system_provided=False, dynamic_variable='', constant_value='') rationale='The agent confirmed the appointment for \"Wednesday, May thirteenth, at nine in the morning\" after the user selected \"Wednesday\", and the conversation occurred in 2026, making the full date 20260513.'_data_collection_id='scheduled_time' value='0900' json_schema=LiteralJsonSchemaProperty(type='string', description='The confirmed time of the service appointment in HHMM (24hour) format.', enum=None, is_system_provided=False, dynamic_variable='', constant_value='') rationale='The agent confirms the appointment for \"nine in the morning\" on Wednesday, May thirteenth, which translates to 0900 in HHMM format.'"
+    }
+  ],
+  "outcome_detail": "booked slot slot_chosen_data_collection_id='scheduled_date' value='20260513' json_schema=LiteralJsonSchemaProperty(type='string', description='The confirmed date of the service appointment in YYYYMMDD format.', enum=None, is_system_provided=False, dynamic_variable='', constant_value='') rationale='The agent confirmed the appointment for \"Wednesday, May thirteenth, at nine in the morning\" after the user selected \"Wednesday\", and the conversation occurred in 2026, making the full date 20260513.'_data_collection_id='scheduled_time' value='0900' json_schema=LiteralJsonSchemaProperty(type='string', description='The confirmed time of the service appointment in HHMM (24hour) format.', enum=None, is_system_provided=False, dynamic_variable='', constant_value='') rationale='The agent confirms the appointment for \"nine in the morning\" on Wednesday, May thirteenth, which translates to 0900 in HHMM format.'",
+  "booked_slot_id": "slot_chosen_data_collection_id='scheduled_date' value='20260513' json_schema=LiteralJsonSchemaProperty(type='string', description='The confirmed date of the service appointment in YYYYMMDD format.', enum=None, is_system_provided=False, dynamic_variable='', constant_value='') rationale='The agent confirmed the appointment for \"Wednesday, May thirteenth, at nine in the morning\" after the user selected \"Wednesday\", and the conversation occurred in 2026, making the full date 20260513.'_data_collection_id='scheduled_time' value='0900' json_schema=LiteralJsonSchemaProperty(type='string', description='The confirmed time of the service appointment in HHMM (24hour) format.', enum=None, is_system_provided=False, dynamic_variable='', constant_value='') rationale='The agent confirms the appointment for \"nine in the morning\" on Wednesday, May thirteenth, which translates to 0900 in HHMM format.'",
+  "created_at": "2026-05-11T12:20:33.272516Z",
+  "closed_at": "2026-05-11T12:22:11.868215Z"
+}

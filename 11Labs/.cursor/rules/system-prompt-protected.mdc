@@ -1,0 +1,38 @@
+---
+description: System prompt is human-authored. The agent does not change its wording.
+alwaysApply: true
+---
+
+# `config/system-prompt.md` is protected
+
+The file `config/system-prompt.md` is the human-authored brief for Kate.
+The user — not the AI assistant — owns its wording.
+
+## Always allowed (no permission needed)
+
+- **Reading** the file (e.g. for the variable audit, validation, rendering).
+- Reporting what it currently contains.
+
+## Allowed only with explicit user permission, in this turn
+
+- Adding or removing `{{variable}}` placeholders to sync with the `Case`
+  schema or `agent.toml.variables`.
+- Mechanical fixes to broken markdown that affect rendering (e.g. an
+  unclosed code fence).
+- Replacing the file wholesale (e.g. via the `pull` command). The
+  `pull` CLI is itself an explicit user action; running it does not
+  require a separate permission prompt.
+
+## Forbidden without explicit user permission, in this turn
+
+- Changing tone, persona, or instruction wording.
+- Adding, removing, or renaming sections (Personality, Environment,
+  Goal, Tone, FAQ, Tools, Guardrails).
+- Rewording guardrails, even to "improve" them.
+- Changing FAQ content.
+- "Drafting a revision" without being asked.
+
+## When in doubt
+
+Ask. A two-line clarifying question is cheap. A silent edit to Kate's
+voice is not.

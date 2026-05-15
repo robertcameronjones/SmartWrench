@@ -1,0 +1,18 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+out/
+
+# Coverage / pytest artifacts
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+.ruff_cache/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+

@@ -1,0 +1,49 @@
+# --- python ---
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+*.egg
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+build/
+dist/
+
+# --- virtualenvs ---
+.venv/
+**/.venv/
+venv/
+
+# --- secrets — NEVER commit ---
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+# --- runtime data (lives on Render persistent disk in production) ---
+/data/
+11Labs/data/
+sms/data/
+sms_adapter/data/
+
+# --- ngrok / local dev ---
+**/.ngrok.log
+*.log
+!docs/**/*.log
+
+# --- editor / OS ---
+.DS_Store
+.idea/
+.vscode/
+!newmaintenance.code-workspace
+
+# --- coverage / reports (regenerated) ---
+11Labs/reports/
+
+# --- node, just in case ---
+node_modules/

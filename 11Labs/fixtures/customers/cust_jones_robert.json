@@ -1,0 +1,9 @@
+{
+  "id": "cust_jones_robert",
+  "first_name": "Robert",
+  "last_name": "Jones",
+  "phone": "+13139095330",
+  "opt_status": "opted_in",
+  "preferred_channel": "voice",
+  "timezone": "America/Detroit"
+}

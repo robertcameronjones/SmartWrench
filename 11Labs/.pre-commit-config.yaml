@@ -1,0 +1,36 @@
+# Run on every commit. Mirrors the CI checks so failures are caught locally.
+#
+# Install once:  pre-commit install
+# Run manually:  pre-commit run --all-files
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+      - id: detect-private-key
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.5.0
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: https://github.com/RobertCraigie/pyright-python
+    rev: v1.1.370
+    hooks:
+      - id: pyright
+        additional_dependencies:
+          - pydantic>=2.7
+          - pydantic-settings>=2.3
+          - structlog>=24.1
+          - elevenlabs>=2.45.0
+          - returns>=0.23
+          - tenacity>=8.5
+          - anyio>=4.4

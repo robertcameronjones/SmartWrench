@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Guidepoint Simulator</title>
+  <link rel="stylesheet" href="/static/app.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-name">Guidepoint</span>
+      <span class="brand-sub">Simulator</span>
+    </div>
+    <div class="agent-info">
+      <span class="agent-label">Agent</span>
+      <span class="agent-name">Kate</span>
+    </div>
+    <div class="topbar-status" id="connection-pill" data-state="unknown">
+      <span class="dot"></span>
+      <span class="text">checking...</span>
+    </div>
+  </header>
+
+  <main class="grid">
+    <!-- ================== LEFT: MASTER DATA (always loaded) ================== -->
+    <section class="panel case-panel">
+
+      <details open class="entity-block" data-entity="customer">
+        <summary>Customer <span class="entity-pill" data-entity-status="customer">--</span></summary>
+        <form data-form="customer" class="case-form" autocomplete="off">
+          <div class="grid-2">
+            <label>Customer ID<input data-path="id" readonly /></label>
+            <label>First name<input data-path="first_name" /></label>
+            <label>Last name<input data-path="last_name" /></label>
+            <label>Phone<input data-path="phone" /></label>
+            <label>Opt status
+              <select data-path="opt_status">
+                <option value="opted_in">opted_in</option>
+                <option value="opted_out">opted_out</option>
+                <option value="unknown">unknown</option>
+              </select>
+            </label>
+            <label>Preferred channel
+              <select data-path="preferred_channel">
+                <option value="voice">voice</option>
+                <option value="sms">sms</option>
+                <option value="email">email</option>
+                <option value="unknown">unknown</option>
+              </select>
+            </label>
+            <label class="span-2">Timezone<input data-path="timezone" /></label>
+          </div>
+          <div class="form-actions">
+            <button type="button" class="btn btn-primary" data-save="customer">Save customer</button>
+          </div>
+        </form>
+      </details>
+
+      <details open class="entity-block" data-entity="vehicle">
+        <summary>Vehicle <span class="entity-pill" data-entity-status="vehicle">--</span></summary>
+        <form data-form="vehicle" class="case-form" autocomplete="off">
+          <div class="grid-2">
+            <label>VIN<input data-path="vin" readonly /></label>
+            <label>Owner ID<input data-path="owner_id" /></label>
+            <label>Year<input data-path="year" type="number" /></label>
+            <label>Make<input data-path="make" /></label>
+            <label>Model<input data-path="model" /></label>
+            <label>Odometer (mi)<input data-path="odometer_miles" type="number" /></label>
+            <label>Latitude<input data-path="current_location.latitude" type="number" step="any" /></label>
+            <label>Longitude<input data-path="current_location.longitude" type="number" step="any" /></label>
+            <label class="span-2">Location description<input data-path="current_location.description" /></label>
+          </div>
+          <div class="form-actions">
+            <button type="button" class="btn btn-primary" data-save="vehicle">Save vehicle</button>
+          </div>
+        </form>
+      </details>
+
+      <details open class="entity-block" data-entity="dealer">
+        <summary>Dealer <span class="entity-pill" data-entity-status="dealer">--</span></summary>
+        <form data-form="dealer" class="case-form" autocomplete="off">
+          <div class="grid-2">
+            <label>Dealer ID<input data-path="id" readonly /></label>
+            <label class="span-2">Name<input data-path="name" /></label>
+            <label>Phone<input data-path="phone" /></label>
+            <label class="span-2">Address<input data-path="address" /></label>
+            <label>Ride radius (mi)<input data-path="ride_radius_miles" type="number" /></label>
+          </div>
+          <div class="form-actions">
+            <button type="button" class="btn btn-primary" data-save="dealer">Save dealer</button>
+          </div>
+        </form>
+      </details>
+
+      <details open class="entity-block" data-entity="slots">
+        <summary>Appointment slots <span class="entity-pill" data-entity-status="slots">--</span></summary>
+        <div class="case-form">
+          <ol id="slots-editor" class="slots-editor"></ol>
+          <div class="form-actions">
+            <button type="button" class="btn btn-ghost" id="add-slot">Add slot</button>
+            <button type="button" class="btn btn-primary" data-save="slots">Save slots</button>
+          </div>
+          <p class="hint">
+            These are the appointment options Kate offers. The chosen slot
+            is parsed from the call transcript afterwards.
+          </p>
+        </div>
+      </details>
+    </section>
+
+    <!-- ================== RIGHT TOP: TRIGGER (compose + fire) ================== -->
+    <section class="panel trigger-panel">
+      <div class="panel-head">
+        <h2>Trigger</h2>
+        <span class="case-id-pill" id="active-case-pill">no case</span>
+      </div>
+
+      <form id="trigger-form" class="trigger-form" autocomplete="off">
+        <label class="trigger-field">
+          <span>Channel</span>
+          <div class="channel-radios">
+            <label class="channel-radio">
+              <input type="radio" name="trig-channel" value="voice" checked />
+              <span>Voice (ElevenLabs)</span>
+            </label>
+            <label class="channel-radio">
+              <input type="radio" name="trig-channel" value="sms" />
+              <span>SMS (Twilio + LLM)</span>
+            </label>
+          </div>
+        </label>
+        <label class="trigger-field">
+          <span>Service type</span>
+          <select id="trig-service-type">
+            <option value="dtc">dtc</option>
+            <option value="recall">recall</option>
+            <option value="maintenance" selected>maintenance</option>
+          </select>
+        </label>
+        <label class="trigger-field">
+          <span>Service summary</span>
+          <input id="trig-summary" placeholder="e.g. oil change, transmission recall" />
+        </label>
+        <label class="trigger-field">
+          <span>Narrative (Kate's context, not read aloud)</span>
+          <textarea id="trig-narrative" rows="2" placeholder="optional internal context"></textarea>
+        </label>
+        <button id="fire-btn" class="btn btn-trigger" type="button">
+          <span class="btn-main">Fire</span>
+          <span class="btn-sub">uses customer / vehicle / dealer / slots above</span>
+        </button>
+      </form>
+
+      <div class="status-grid">
+        <div class="status-cell">
+          <div class="status-label">Connection</div>
+          <div class="status-value"><span class="dot" id="status-conn-dot"></span> <span id="status-conn-text">--</span></div>
+        </div>
+        <div class="status-cell">
+          <div class="status-label">Channel</div>
+          <div class="status-value" id="status-channel-text">voice</div>
+        </div>
+        <div class="status-cell">
+          <div class="status-label">Case state</div>
+          <div class="status-value"><span class="dot dot-state" id="status-wf-dot"></span> <span id="status-wf-text">idle</span></div>
+        </div>
+        <div class="status-cell">
+          <div class="status-label">Last fired</div>
+          <div class="status-value" id="status-last">--</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================== RIGHT BOTTOM: LIVE LOG ================== -->
+    <section class="panel log-panel">
+      <div class="panel-head">
+        <h2>Live log</h2>
+        <div class="panel-head-actions">
+          <span class="ws-pill" id="ws-pill" data-state="disconnected">
+            <span class="dot"></span><span class="text">ws: disconnected</span>
+          </span>
+          <button id="clear-log" class="btn btn-ghost" type="button">Clear</button>
+        </div>
+      </div>
+      <div id="log" class="log" aria-live="polite"></div>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

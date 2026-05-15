@@ -1,0 +1,17 @@
+[
+  {
+    "id": "slot_2026_05_12_0830",
+    "starts_at": "2026-05-12T12:30:00Z",
+    "display": "Tuesday, May 12, 2026 - 8:30 AM"
+  },
+  {
+    "id": "slot_2026_05_12_1330",
+    "starts_at": "2026-05-12T17:30:00Z",
+    "display": "Tuesday, May 12, 2026 - 1:30 PM"
+  },
+  {
+    "id": "slot_2026_05_13_0900",
+    "starts_at": "2026-05-13T13:00:00Z",
+    "display": "Wednesday, May 13, 2026 - 9:00 AM"
+  }
+]

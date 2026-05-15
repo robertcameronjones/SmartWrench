@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sms_adapter"
+version = "0.1.0"
+description = "Conversation half of the SMS channel: per-conversation history, inbound routing, LLM-driven replies. Reuses sms/ for Twilio and llm/ for LiteLLM."
+readme = "README.md"
+requires-python = ">=3.12"
+
+dependencies = [
+  "prompt_composer",
+  "sms",
+  "llm",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.2",
+  "pytest-asyncio>=0.23",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

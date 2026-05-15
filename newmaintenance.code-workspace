@@ -1,0 +1,39 @@
+{
+  "folders": [
+    {
+      "name": "simulator",
+      "path": "simulator"
+    },
+    {
+      "name": "prompt_composer",
+      "path": "prompt_composer"
+    },
+    {
+      "name": "voice (11Labs)",
+      "path": "11Labs"
+    },
+    {
+      "name": "sms_adapter",
+      "path": "sms_adapter"
+    },
+    {
+      "name": "sms (twilio pipe)",
+      "path": "sms"
+    },
+    {
+      "name": "llm",
+      "path": "llm"
+    }
+  ],
+  "settings": {
+    "search.exclude": {
+      "**/.venv": true,
+      "**/__pycache__": true,
+      "**/node_modules": true,
+      "**/*.log.jsonl": true
+    },
+    "files.exclude": {
+      "**/__pycache__": true
+    }
+  }
+}

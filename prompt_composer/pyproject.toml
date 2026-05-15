@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "prompt_composer"
+version = "0.1.0"
+description = "Render the channel-appropriate system prompt for a Case. Pure function. No I/O beyond reading the spot md files. Never edits prompt content."
+readme = "README.md"
+requires-python = ">=3.12"
+
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.2",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

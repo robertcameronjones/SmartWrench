@@ -1,0 +1,36 @@
+---
+description: Architectural manifesto for this project. Read before writing any code.
+alwaysApply: true
+---
+
+# This is not an AI-slop project.
+
+**Before making any code change, read `docs/ARCHITECTURE.md` and any ADR in `docs/adr/` relevant to your change.** This is non-negotiable.
+
+## The rules at a glance (full text in `docs/ARCHITECTURE.md`)
+
+1. **SPOT** — every fact has one owner. Source of truth owns its writes.
+2. **One locus of control** — single event-driven state machine. No state lives only in process memory.
+3. **Encapsulation enforced by tooling** — `_underscore` prefix + `__all__` + Pyright `reportPrivateUsage = error`.
+4. **The LLM is untrusted I/O** — validate every tool argument and every action-bearing output with Pydantic.
+5. **Time is injected** — never `datetime.now()`. Use the `Clock` Protocol.
+6. **Functional core, imperative shell** — pure logic over immutable data; I/O at the edges.
+7. **Errors are typed values for expected failures.** Exceptions are for bugs.
+8. **Configuration is one frozen object validated at startup.** No `os.getenv` scattered around.
+9. **No globals, no singletons, no module-level mutable state.** Constructor injection only.
+10. **No magic.** No metaclass tricks, no monkey-patching, no `print()`.
+
+## Hard-block before acting
+
+- New external dependency? → write an ADR first (`docs/adr/NNNN-*.md`, copy `0000-template.md`).
+- New module? → start with the Protocol, an empty `__init__.py`, and a failing test.
+- Architectural decision? → record it as an ADR in the same PR.
+
+## Never do
+
+- Edit the dashboard agent config when `config/` exists as the source of truth.
+- Add a global, a singleton, or a module-level side effect.
+- Use `print()` — use `structlog`.
+- Call `datetime.now()` directly — inject `Clock`.
+- Use `from x import *`.
+- Mark a PR ready while CI is red or coverage is below 90%.

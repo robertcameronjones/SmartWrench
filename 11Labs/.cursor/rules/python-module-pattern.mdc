@@ -1,0 +1,56 @@
+---
+description: Module layout, encapsulation, and typing patterns for guidepoint Python code.
+globs: src/**/*.py,tests/**/*.py
+alwaysApply: false
+---
+
+# Python module pattern
+
+Copy `src/guidepoint/scheduling/` as your template. Every module follows it.
+
+## Layout
+
+```
+src/guidepoint/<concept>/
+├── __init__.py     # public surface ONLY: __all__ + re-exports
+├── _models.py      # frozen dataclasses, errors, NewType ids
+├── _protocol.py    # the Protocol interface
+└── _service.py     # private impl + build_<concept>() factory
+```
+
+The `__init__.py` re-exports a tight `__all__`. Anything else is invisible to consumers.
+
+## Required patterns
+
+- **Frozen value types:** `@final @dataclass(frozen=True, slots=True)` for every model.
+- **Phantom typed ids:** `CustomerId = NewType("CustomerId", str)` — never bare `str` for identifiers.
+- **Protocols, not ABCs**, for interfaces. `@override` on every Protocol method implementation.
+- **Factories, not constructors**, for building services: `def build_scheduling(*, slot_provider: SlotProvider) -> SchedulingService`.
+- **Keyword-only constructor args** to defeat positional-arg accidents.
+- **Errors are a hierarchy.** `BookingError(Exception)` base, then `@final SlotUnavailableError(BookingError)`.
+- **No relative imports across packages.** Always `from guidepoint.x import y`.
+
+## Forbidden
+
+- Importing `_underscore` names from another module — Pyright `reportPrivateUsage = error` will fail CI.
+- `print()` (Ruff `T20`).
+- `datetime.now()` directly (Ruff `DTZ`). Inject a `Clock`.
+- Module-level mutable state (lists, dicts, counters).
+- `from x import *` (Ruff `F403`).
+
+## Tests
+
+- Live in `tests/<module>/` mirroring `src/guidepoint/<module>/`.
+- Fakes go in `tests/<module>/_fakes.py` — never in `src/`.
+- Use the `@override` decorator on Protocol method implementations in fakes.
+- One behavior per test method. Test class groups related behaviors.
+- Coverage gate is 90%. No exceptions for "trivial" code.
+
+## Before opening a PR
+
+1. `ruff check src tests`
+2. `ruff format --check src tests`
+3. `pyright`
+4. `pytest`
+
+All four must pass.

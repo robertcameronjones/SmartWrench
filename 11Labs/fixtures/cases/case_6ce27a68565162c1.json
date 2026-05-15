@@ -1,0 +1,148 @@
+{
+  "case_id": "case_6ce27a68565162c1",
+  "trigger_id": "trig_ff45b8593cfc",
+  "correlation_id": "corr_e738e8037958",
+  "customer": {
+    "id": "cust_jones_robert",
+    "first_name": "Robert",
+    "last_name": "Jones",
+    "phone": "+13139095330",
+    "opt_status": "opted_in",
+    "preferred_channel": "voice",
+    "timezone": "America/Detroit"
+  },
+  "dealer": {
+    "id": "dealer_village_jeep_royal_oak",
+    "name": "Village Jeep",
+    "phone": "+12487813798",
+    "address": "31200 Woodward Ave, Royal Oak, MI 48073",
+    "ride_radius_miles": 10
+  },
+  "vehicle": {
+    "vin": "1C4RJFBG5NC123456",
+    "owner_id": "cust_jones_robert",
+    "year": 2025,
+    "make": "Jeep",
+    "model": "Grand Cherokee",
+    "odometer_miles": 32180,
+    "current_location": {
+      "latitude": 42.4895,
+      "longitude": -83.1446,
+      "description": "Owner's home, driveway"
+    }
+  },
+  "service_event": {
+    "type": "maintenance",
+    "summary": "oil change",
+    "narrative": ""
+  },
+  "offered_slots": [
+    {
+      "id": "slot_2026_05_12_0830",
+      "starts_at": "2026-05-12T12:30:00Z",
+      "display": "Tuesday, May 12, 2026 - 8:30 AM"
+    },
+    {
+      "id": "slot_2026_05_12_1330",
+      "starts_at": "2026-05-12T17:30:00Z",
+      "display": "Tuesday, May 12, 2026 - 1:30 PM"
+    },
+    {
+      "id": "slot_2026_05_13_0900",
+      "starts_at": "2026-05-13T13:00:00Z",
+      "display": "Wednesday, May 13, 2026 - 9:00 AM"
+    }
+  ],
+  "state": "booked",
+  "attempt_count": 1,
+  "next_attempt_at": null,
+  "call_attempts": [
+    {
+      "attempt_number": 1,
+      "outcome": {
+        "result": "answered",
+        "business_outcome": "booked",
+        "booked_slot_id": "slot_chosen_20260513_0900",
+        "elevenlabs_conversation_id": "conv_2401krf18z45fq58xk3rhgj9nm5m",
+        "started_at": "2026-05-12T21:25:19.372365Z",
+        "ended_at": "2026-05-12T21:26:46.320615Z",
+        "duration_seconds": 62.0,
+        "transcript": "[   4.0s] Customer: Hello.\n[   6.0s] Kate: Hello! This is Kate calling about your 2025 Jeep Grand Cherokee. Our system has detected that it needs service for maintenance. I'd love to help you get that scheduled at Village Jeep — does that work for you?\n[  18.0s] Customer: Oh, sure.\n[  19.0s] Kate: Great! I have a few open appointment times available. We have Tuesday, May 12th at 8:30 in the morning, Tuesday at 1:30 in the afternoon, or Wednesday, May 13th at 9:00 in the morning. Which of these works best for you?\n[  33.0s] Customer: So Wednesday at 9.\n[  35.0s] Kate: Perfect! Let me confirm that for you. You're all set for Wednesday, May 13th at 9:00 in the morning at Village Jeep for your 2025 Jeep Grand Cherokee service appointment. Is there anything else I can help you with regarding your visit?\n[  51.0s] Customer: No, thank you.\n[  52.0s] Kate: You're very welcome! Thank you for choosing Village Jeep for your service needs. We look forward to seeing you on Wednesday at 9:00 in the morning. Have a wonderful day!",
+        "recording_url": "",
+        "error_detail": ""
+      }
+    }
+  ],
+  "events": [
+    {
+      "event_id": "evt_7dce035dc58f",
+      "case_id": "case_6ce27a68565162c1",
+      "correlation_id": "corr_e738e8037958",
+      "attempt_number": null,
+      "timestamp": "2026-05-12T21:25:19.370589Z",
+      "source": "system",
+      "level": "info",
+      "event": "case.created",
+      "detail": "trigger=trig_ff45b8593cfc"
+    },
+    {
+      "event_id": "evt_f7c87dedc70e",
+      "case_id": "case_6ce27a68565162c1",
+      "correlation_id": "corr_e738e8037958",
+      "attempt_number": null,
+      "timestamp": "2026-05-12T21:25:19.371936Z",
+      "source": "system",
+      "level": "info",
+      "event": "case.calling",
+      "detail": "attempt 1"
+    },
+    {
+      "event_id": "evt_44dd6de2fcc4",
+      "case_id": "case_6ce27a68565162c1",
+      "correlation_id": "corr_e738e8037958",
+      "attempt_number": 1,
+      "timestamp": "2026-05-12T21:25:19.372377Z",
+      "source": "system",
+      "level": "info",
+      "event": "call.dialing",
+      "detail": "+13139095330"
+    },
+    {
+      "event_id": "evt_f2e09efa3b80",
+      "case_id": "case_6ce27a68565162c1",
+      "correlation_id": "corr_e738e8037958",
+      "attempt_number": 1,
+      "timestamp": "2026-05-12T21:25:19.885409Z",
+      "source": "elevenlabs",
+      "level": "info",
+      "event": "call.placed",
+      "detail": "conversation_id=conv_2401krf18z45fq58xk3rhgj9nm5m"
+    },
+    {
+      "event_id": "evt_b2b640cf7375",
+      "case_id": "case_6ce27a68565162c1",
+      "correlation_id": "corr_e738e8037958",
+      "attempt_number": 1,
+      "timestamp": "2026-05-12T21:26:46.320877Z",
+      "source": "elevenlabs",
+      "level": "info",
+      "event": "conversation.transcript_received",
+      "detail": "conversation_id=conv_2401krf18z45fq58xk3rhgj9nm5m turns=8 duration=62.0s status=done"
+    },
+    {
+      "event_id": "evt_5eb9db8c1ce4",
+      "case_id": "case_6ce27a68565162c1",
+      "correlation_id": "corr_e738e8037958",
+      "attempt_number": null,
+      "timestamp": "2026-05-12T21:26:46.323430Z",
+      "source": "system",
+      "level": "info",
+      "event": "case.booked",
+      "detail": "booked slot slot_chosen_20260513_0900"
+    }
+  ],
+  "outcome_detail": "booked slot slot_chosen_20260513_0900",
+  "booked_slot_id": "slot_chosen_20260513_0900",
+  "created_at": "2026-05-12T21:25:19.369512Z",
+  "closed_at": "2026-05-12T21:26:46.322629Z"
+}

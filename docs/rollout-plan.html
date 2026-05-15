@@ -1,0 +1,737 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Guidepoint Maintenance 2.0 — Rollout Plan</title>
+<style>
+  :root {
+    --ink: #0f172a;
+    --ink-soft: #475569;
+    --line: #e2e8f0;
+    --bg: #ffffff;
+    --bg-soft: #f8fafc;
+    --accent: #1d4ed8;
+    --good: #15803d;
+    --warn: #b45309;
+    --maybe: #6d28d9;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  }
+  main {
+    max-width: 980px;
+    margin: 0 auto;
+    padding: 48px 32px 72px;
+  }
+  header {
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 24px;
+    margin-bottom: 32px;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+  }
+  .logo { flex: 0 0 auto; height: 56px; display: inline-flex; align-items: center; }
+  .logo img { height: 100%; width: auto; display: block; }
+  .header-text { flex: 1; }
+  .eyebrow {
+    font-size: 11px; font-weight: 700; letter-spacing: 0.12em;
+    color: var(--accent); text-transform: uppercase; margin-bottom: 4px;
+  }
+  h1 { font-size: 28px; margin: 0 0 6px; letter-spacing: -0.01em; }
+  .subtitle { color: var(--ink-soft); font-size: 15px; }
+
+  h2 {
+    font-size: 18px;
+    margin: 36px 0 12px;
+    letter-spacing: -0.01em;
+  }
+  p { margin: 0 0 12px; }
+  ul { margin: 0 0 12px; padding-left: 22px; }
+  li { margin-bottom: 4px; }
+
+  .lede { font-size: 16px; color: var(--ink-soft); }
+
+  /* phase cards */
+  .phase {
+    border: 1px solid var(--line);
+    border-left: 4px solid var(--accent);
+    border-radius: 10px;
+    padding: 16px 20px;
+    margin: 12px 0;
+    background: var(--bg-soft);
+  }
+  .phase-head {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    margin-bottom: 6px;
+  }
+  .phase-num {
+    flex: 0 0 auto;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    color: var(--accent);
+    text-transform: uppercase;
+  }
+  .phase-name {
+    flex: 1;
+    font-size: 17px;
+    font-weight: 600;
+  }
+  .phase-effort {
+    flex: 0 0 auto;
+    font-size: 12px;
+    color: var(--ink-soft);
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 2px 10px;
+  }
+  .phase-goal {
+    font-size: 14px;
+    color: var(--ink-soft);
+    margin-bottom: 8px;
+  }
+  .phase-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px 20px;
+    font-size: 14px;
+  }
+  .phase-grid dt {
+    color: var(--ink-soft);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-top: 6px;
+  }
+  .phase-grid dd {
+    margin: 0 0 4px;
+  }
+  .phase-grid ul { margin: 4px 0 0; padding-left: 18px; }
+  .phase-grid li { margin-bottom: 2px; }
+
+  .phase.signoff { border-left-color: var(--maybe); }
+  .phase.signoff .phase-num { color: var(--maybe); }
+  .phase.go-live { border-left-color: var(--good); }
+  .phase.go-live .phase-num { color: var(--good); }
+  .phase.handoff { border-left-color: var(--warn); }
+  .phase.handoff .phase-num { color: var(--warn); }
+
+  /* AWS box */
+  .aws-panel {
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 18px 20px;
+    background: #fff;
+    margin-top: 12px;
+  }
+  .aws-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+  .aws-cat h3 {
+    margin: 0 0 4px;
+    font-size: 14px;
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .aws-cat p {
+    color: var(--ink-soft);
+    font-size: 13px;
+    margin: 0 0 4px;
+  }
+  .aws-cat ul {
+    margin: 0;
+    padding-left: 18px;
+    font-size: 14px;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 8px 0 0;
+    font-size: 14px;
+  }
+  th, td {
+    text-align: left;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+  }
+  th {
+    color: var(--ink-soft);
+    font-weight: 600;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+
+  footer {
+    margin-top: 48px;
+    padding-top: 18px;
+    border-top: 1px solid var(--line);
+    color: var(--ink-soft);
+    font-size: 13px;
+  }
+
+  /* Gantt chart */
+  .gantt {
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: #fff;
+    padding: 16px;
+    margin-top: 8px;
+    overflow-x: auto;
+  }
+  .gantt-grid {
+    display: grid;
+    grid-template-columns: 220px repeat(20, minmax(28px, 1fr));
+    gap: 4px 0;
+    align-items: center;
+    min-width: 820px;
+    font-size: 12px;
+  }
+  .gantt-header {
+    display: contents;
+    color: var(--ink-soft);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .gantt-header .gantt-label { font-weight: 600; }
+  .gantt-week {
+    text-align: center;
+    border-bottom: 1px solid var(--line);
+    padding: 4px 0 6px;
+    font-weight: 600;
+  }
+  .gantt-row {
+    display: contents;
+  }
+  .gantt-label {
+    padding: 6px 10px 6px 0;
+    color: var(--ink);
+    font-weight: 500;
+    border-right: 1px solid var(--line);
+  }
+  .gantt-label small {
+    display: block;
+    color: var(--ink-soft);
+    font-weight: 400;
+    font-size: 11px;
+  }
+  .gantt-cell {
+    height: 22px;
+    border-right: 1px dashed #f1f5f9;
+  }
+  .gantt-bar {
+    height: 18px;
+    border-radius: 4px;
+    background: var(--accent);
+    margin: 2px 1px;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 0 8px;
+    display: flex;
+    align-items: center;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+  .gantt-bar.signoff { background: var(--maybe); }
+  .gantt-bar.go-live { background: var(--good); }
+  .gantt-bar.handoff { background: var(--warn); }
+  .gantt-bar.aws    { background: #334155; }
+  .gantt-bar.live   {
+    background: repeating-linear-gradient(
+      45deg, var(--good), var(--good) 6px, #16a34a 6px, #16a34a 12px
+    );
+  }
+  .gantt-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 12px;
+    font-size: 12px;
+    color: var(--ink-soft);
+  }
+  .gantt-legend span {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .gantt-legend i {
+    width: 12px;
+    height: 12px;
+    border-radius: 3px;
+    display: inline-block;
+  }
+
+  @media (max-width: 720px) {
+    .phase-grid, .aws-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<main>
+
+<header>
+  <div class="logo">
+    <img src="logo.png" alt="Guidepoint Systems" />
+  </div>
+  <div class="header-text">
+    <div class="eyebrow">Guidepoint Maintenance 2.0 Agentic</div>
+    <h1>Rollout Plan</h1>
+    <p class="subtitle">From today's working prototype to a production system serving real dealers and customers.</p>
+  </div>
+</header>
+
+<p class="lede">
+  We have a working end‑to‑end prototype: voice + SMS, a real Twilio number, the LLM behind Kate, the case
+  lifecycle worked out and signed off in concept. This plan moves us from "runs on a laptop with one operator"
+  to "runs in the cloud for a pilot dealer's customers." Eight phases, roughly sequential.
+</p>
+
+<h2>Phase 1 — Internal Demo</h2>
+<div class="phase">
+  <div class="phase-head">
+    <div class="phase-num">Phase 1</div>
+    <div class="phase-name">Internal demo</div>
+    <div class="phase-effort">~1 day</div>
+  </div>
+  <div class="phase-goal">Show leadership and sales the working prototype end‑to‑end so they can see and feel what we'll be selling.</div>
+  <dl class="phase-grid">
+    <dt>What we show</dt>
+    <dd>
+      <ul>
+        <li>Voice booking call (real ElevenLabs voice)</li>
+        <li>SMS booking, including reschedule</li>
+        <li>The lifecycle one‑pager (this companion document)</li>
+      </ul>
+    </dd>
+    <dt>Deliverables</dt>
+    <dd>
+      <ul>
+        <li>30‑minute demo deck (3 slides + screen share)</li>
+        <li>Recording for sales enablement</li>
+      </ul>
+    </dd>
+    <dt>Owners</dt>
+    <dd>Product + engineering lead</dd>
+    <dt>Exit criteria</dt>
+    <dd>Leadership says "yes, build the rest."</dd>
+  </dl>
+</div>
+
+<h2>Phase 2 — Lifecycle Signoff</h2>
+<div class="phase signoff">
+  <div class="phase-head">
+    <div class="phase-num">Phase 2</div>
+    <div class="phase-name">Lifecycle signoff</div>
+    <div class="phase-effort">~3 days</div>
+  </div>
+  <div class="phase-goal">Walk Operations, Sales, and a friendly dealer through the lifecycle one‑pager. Lock the policy decisions before any production code is written.</div>
+  <dl class="phase-grid">
+    <dt>Decisions to lock</dt>
+    <dd>
+      <ul>
+        <li>Trigger sources (recall, DTC, regular maintenance)</li>
+        <li>Channel preference rule (per customer? per trigger type?)</li>
+        <li>Timeout windows (today: 24h nudge / 48h close)</li>
+        <li>Reschedule mechanics (slot inventory, blackout windows)</li>
+        <li>What "Decline" means commercially (do not contact list?)</li>
+      </ul>
+    </dd>
+    <dt>Open questions</dt>
+    <dd>
+      <ul>
+        <li>How do dealers actually feed us their open slots?</li>
+        <li>Who owns the customer "do not contact" master record?</li>
+        <li>Compliance: TCPA opt‑in language for SMS?</li>
+      </ul>
+    </dd>
+    <dt>Owners</dt>
+    <dd>Product + Operations + a friendly dealer GM</dd>
+    <dt>Exit criteria</dt>
+    <dd>Lifecycle one‑pager v1 signed off; open items become Phase 3 prerequisites or explicit deferrals.</dd>
+  </dl>
+</div>
+
+<h2>Phase 3 — Deploy Prototype</h2>
+<div class="phase">
+  <div class="phase-head">
+    <div class="phase-num">Phase 3</div>
+    <div class="phase-name">Deploy prototype to cloud</div>
+    <div class="phase-effort">~3 days</div>
+  </div>
+  <div class="phase-goal">Get the simulator off the laptop and onto a real cloud URL with secure access, so multiple people can use it from anywhere without our laptop being on.</div>
+  <dl class="phase-grid">
+    <dt>Stack</dt>
+    <dd>
+      <ul>
+        <li>Render (or Fly.io) for the simulator service</li>
+        <li>Cloudflare Access in front for login + 2FA (free up to 50 users)</li>
+        <li>Custom subdomain (e.g. <code>kate‑demo.guidepoint.com</code>)</li>
+        <li>Twilio webhook permanently pointed at the new URL</li>
+      </ul>
+    </dd>
+    <dt>What changes in code</dt>
+    <dd>
+      <ul>
+        <li>Persistent storage (small disk or SQLite file)</li>
+        <li>Twilio signature validation back ON</li>
+        <li>Bearer‑token auth on internal endpoints</li>
+        <li>Log retention policy</li>
+      </ul>
+    </dd>
+    <dt>Owners</dt>
+    <dd>Engineering</dd>
+    <dt>Exit criteria</dt>
+    <dd>Anyone on the access list can log in from anywhere, fire a case, complete an SMS booking. Twilio resilient to laptop closing.</dd>
+  </dl>
+</div>
+
+<h2>Phase 4 — Find Pilot Dealer</h2>
+<div class="phase">
+  <div class="phase-head">
+    <div class="phase-num">Phase 4</div>
+    <div class="phase-name">Find pilot dealer</div>
+    <div class="phase-effort">~2–4 weeks (sales cycle)</div>
+  </div>
+  <div class="phase-goal">Identify and onboard one friendly dealer willing to feed us live triggers and live customer phone numbers.</div>
+  <dl class="phase-grid">
+    <dt>What we need from them</dt>
+    <dd>
+      <ul>
+        <li>Customer roster (name, phone, vehicle, opt‑in status)</li>
+        <li>Open service slot inventory (manual feed OK initially)</li>
+        <li>One SMS opt‑in plan that covers their customers (TCPA compliance)</li>
+        <li>A named operator to watch the queue and approve first few cases</li>
+      </ul>
+    </dd>
+    <dt>What they get</dt>
+    <dd>
+      <ul>
+        <li>Custom branded outreach (their dealership name, voice persona)</li>
+        <li>Read‑only dashboard for cases in flight</li>
+        <li>Pilot pricing (free or steeply discounted)</li>
+      </ul>
+    </dd>
+    <dt>Owners</dt>
+    <dd>Sales + Product</dd>
+    <dt>Exit criteria</dt>
+    <dd>Signed pilot agreement. First 10 real cases run through the system.</dd>
+  </dl>
+</div>
+
+<h2>Phase 5 — Concurrency: Multiple Parallel Cases</h2>
+<div class="phase">
+  <div class="phase-head">
+    <div class="phase-num">Phase 5</div>
+    <div class="phase-name">Concurrency &amp; durability</div>
+    <div class="phase-effort">~1 week</div>
+  </div>
+  <div class="phase-goal">Handle dozens of cases at the same time without losing state, double‑sending, or interleaving turns within a single conversation.</div>
+  <dl class="phase-grid">
+    <dt>Engineering work</dt>
+    <dd>
+      <ul>
+        <li>Move case + conversation + history + routing into a single SQLite (then later Postgres) schema</li>
+        <li>Per‑conversation row lock so simultaneous inbounds serialize</li>
+        <li>Background scheduler for time‑driven phase transitions (reminder, verify nudge, timeouts)</li>
+        <li>Trigger queue with the 1:1‑per‑phone rule enforced</li>
+        <li>Idempotency keys on outbound SMS so a retry can't double‑send</li>
+      </ul>
+    </dd>
+    <dt>Test plan</dt>
+    <dd>
+      <ul>
+        <li>Load test: 100 simultaneous open cases</li>
+        <li>Crash test: kill the service mid‑conversation, restart, customer's next reply is handled cleanly</li>
+        <li>Drift test: clock advance through full lifecycle including reminders &amp; verify</li>
+      </ul>
+    </dd>
+    <dt>Owners</dt>
+    <dd>Engineering</dd>
+    <dt>Exit criteria</dt>
+    <dd>Pilot dealer's full daily volume runs through the system with zero lost or duplicated messages over a week.</dd>
+  </dl>
+</div>
+
+<h2>Phase 6 — Bare‑Bones Reporting</h2>
+<div class="phase">
+  <div class="phase-head">
+    <div class="phase-num">Phase 6</div>
+    <div class="phase-name">Reporting v1</div>
+    <div class="phase-effort">~1 week</div>
+  </div>
+  <div class="phase-goal">Give Operations and the dealer the numbers they need to trust the system.</div>
+  <dl class="phase-grid">
+    <dt>Operator dashboard</dt>
+    <dd>
+      <ul>
+        <li>Open cases (by phase)</li>
+        <li>Queued triggers</li>
+        <li>Today's outcomes (booked / declined / timed out / no‑show)</li>
+        <li>Channel mix (voice vs SMS)</li>
+        <li>Inspect any case → see full transcript</li>
+      </ul>
+    </dd>
+    <dt>Dealer report (weekly)</dt>
+    <dd>
+      <ul>
+        <li>Triggers received → cases opened → booked → showed → serviced</li>
+        <li>Conversion at each phase</li>
+        <li>Average time‑to‑book</li>
+        <li>$ value of booked work (if dealer feeds us pricing)</li>
+      </ul>
+    </dd>
+    <dt>Owners</dt>
+    <dd>Engineering + Operations</dd>
+    <dt>Exit criteria</dt>
+    <dd>Dealer GM uses the dashboard unprompted at least once a week.</dd>
+  </dl>
+</div>
+
+<h2>Phase 7 — Go‑Live with Pilot</h2>
+<div class="phase go-live">
+  <div class="phase-head">
+    <div class="phase-num">Phase 7</div>
+    <div class="phase-name">Pilot go‑live</div>
+    <div class="phase-effort">~4 weeks (live operation)</div>
+  </div>
+  <div class="phase-goal">Run real customers, learn, iterate prompts and policies, build the case study.</div>
+  <dl class="phase-grid">
+    <dt>What "running" looks like</dt>
+    <dd>
+      <ul>
+        <li>Daily trigger feed from the dealer (CSV upload OK at first)</li>
+        <li>Operator monitors the queue, intervenes on edge cases</li>
+        <li>Weekly review with the dealer GM on metrics</li>
+        <li>Bi‑weekly prompt tuning based on transcripts</li>
+      </ul>
+    </dd>
+    <dt>Owners</dt>
+    <dd>Product + Operations + dealer operator</dd>
+    <dt>Exit criteria</dt>
+    <dd>30 days of clean operation, conversion numbers we can quote, two case studies in writing.</dd>
+  </dl>
+</div>
+
+<h2>Phase 8 — Implementation Handoff</h2>
+<div class="phase handoff">
+  <div class="phase-head">
+    <div class="phase-num">Phase 8</div>
+    <div class="phase-name">Implementation handoff to engineering org</div>
+    <div class="phase-effort">~2 weeks</div>
+  </div>
+  <div class="phase-goal">Transition from prototype team to the engineering organization that will own this in production at scale.</div>
+  <dl class="phase-grid">
+    <dt>Deliverables</dt>
+    <dd>
+      <ul>
+        <li>Architecture document (this lifecycle + data model + service map)</li>
+        <li>Runbook (how to start/stop, where logs live, what alerts mean)</li>
+        <li>Test suite (unit + integration + smoke)</li>
+        <li>Migration path from SQLite/Render to AWS production stack (next section)</li>
+        <li>Backlog of known limitations + next features</li>
+      </ul>
+    </dd>
+    <dt>Owners</dt>
+    <dd>Engineering lead → receiving team's tech lead</dd>
+    <dt>Exit criteria</dt>
+    <dd>Receiving team can deploy a fix, run the test suite, and respond to a Twilio outage without prototype team's help.</dd>
+  </dl>
+</div>
+
+<h2>What it takes to stand up on AWS for production</h2>
+<p class="lede">
+  Render or Fly.io is right for the prototype and pilot. When Guidepoint is ready to host this at production
+  scale on the existing AWS footprint, here's what's added or replaced.
+</p>
+
+<div class="aws-panel">
+  <div class="aws-grid">
+    <div class="aws-cat">
+      <h3>Compute</h3>
+      <p>Run the FastAPI app behind a load balancer with multiple instances for HA.</p>
+      <ul>
+        <li>ECS Fargate (or EKS if there's an existing Kubernetes presence)</li>
+        <li>ALB (application load balancer) with HTTPS</li>
+        <li>Auto‑scaling on request volume</li>
+      </ul>
+    </div>
+    <div class="aws-cat">
+      <h3>Data</h3>
+      <p>Replace SQLite with a managed Postgres for concurrency, durability, and backups.</p>
+      <ul>
+        <li>RDS Postgres (Multi‑AZ for HA)</li>
+        <li>Daily snapshots + point‑in‑time recovery</li>
+        <li>S3 for transcript exports / long‑term audit storage</li>
+      </ul>
+    </div>
+    <div class="aws-cat">
+      <h3>Networking &amp; DNS</h3>
+      <ul>
+        <li>Route 53 for the production hostname</li>
+        <li>ACM certificate for HTTPS</li>
+        <li>VPC with private subnets (DB), public subnets (ALB only)</li>
+      </ul>
+    </div>
+    <div class="aws-cat">
+      <h3>Secrets &amp; identity</h3>
+      <ul>
+        <li>Secrets Manager: Twilio token, OpenRouter key, ElevenLabs key, DB password</li>
+        <li>IAM roles per service (no shared keys in env)</li>
+        <li>SSO or Cloudflare Access for operator dashboard access</li>
+      </ul>
+    </div>
+    <div class="aws-cat">
+      <h3>Observability</h3>
+      <ul>
+        <li>CloudWatch logs (structured JSON)</li>
+        <li>CloudWatch alarms: webhook 5xx rate, LLM latency p95, queue depth</li>
+        <li>Optional: Datadog / Honeycomb for richer tracing</li>
+      </ul>
+    </div>
+    <div class="aws-cat">
+      <h3>Compliance &amp; safety</h3>
+      <ul>
+        <li>SMS opt‑in records stored alongside customer (TCPA defensibility)</li>
+        <li>PII redaction in logs and transcripts (phone, name)</li>
+        <li>Data retention policy + automated purge</li>
+        <li>Per‑dealer data isolation (row‑level security in Postgres)</li>
+      </ul>
+    </div>
+    <div class="aws-cat">
+      <h3>CI/CD</h3>
+      <ul>
+        <li>GitHub Actions → build container → push to ECR → deploy to Fargate</li>
+        <li>Staging environment that mirrors production</li>
+        <li>Database migration tooling (Alembic)</li>
+      </ul>
+    </div>
+    <div class="aws-cat">
+      <h3>Operational extras</h3>
+      <ul>
+        <li>Twilio messaging service (vs single number) for high volume + opt‑out compliance</li>
+        <li>ElevenLabs production tier (vs trial)</li>
+        <li>OpenRouter or direct provider account with billing alerts</li>
+        <li>On‑call rotation + PagerDuty integration</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<h2>Timeline at a glance</h2>
+<p>Several phases run in parallel — sales (Phase 4) overlaps with engineering (Phases 5 &amp; 6) so we're ready to flip the switch the moment a pilot dealer signs.</p>
+
+<div class="gantt">
+  <div class="gantt-grid">
+    <div class="gantt-header">
+      <div class="gantt-label">Phase</div>
+      <div class="gantt-week">W1</div>
+      <div class="gantt-week">W2</div>
+      <div class="gantt-week">W3</div>
+      <div class="gantt-week">W4</div>
+      <div class="gantt-week">W5</div>
+      <div class="gantt-week">W6</div>
+      <div class="gantt-week">W7</div>
+      <div class="gantt-week">W8</div>
+      <div class="gantt-week">W9</div>
+      <div class="gantt-week">W10</div>
+      <div class="gantt-week">W11</div>
+      <div class="gantt-week">W12</div>
+      <div class="gantt-week">W13</div>
+      <div class="gantt-week">W14</div>
+      <div class="gantt-week">W15</div>
+      <div class="gantt-week">W16</div>
+      <div class="gantt-week">W17</div>
+      <div class="gantt-week">W18</div>
+      <div class="gantt-week">W19</div>
+      <div class="gantt-week">W20</div>
+    </div>
+
+    <div class="gantt-row">
+      <div class="gantt-label">1. Internal demo<small>Product + Eng</small></div>
+      <div class="gantt-bar" style="grid-column: 2 / 3;">Demo</div>
+    </div>
+    <div class="gantt-row">
+      <div class="gantt-label">2. Lifecycle signoff<small>Product + Ops</small></div>
+      <div class="gantt-bar signoff" style="grid-column: 2 / 4;">Signoff</div>
+    </div>
+    <div class="gantt-row">
+      <div class="gantt-label">3. Deploy prototype<small>Engineering</small></div>
+      <div class="gantt-bar" style="grid-column: 3 / 4;">Cloud</div>
+    </div>
+    <div class="gantt-row">
+      <div class="gantt-label">4. Find pilot dealer<small>Sales</small></div>
+      <div class="gantt-bar" style="grid-column: 3 / 7;">Sales cycle</div>
+    </div>
+    <div class="gantt-row">
+      <div class="gantt-label">5. Concurrency &amp; durability<small>Engineering</small></div>
+      <div class="gantt-bar" style="grid-column: 4 / 6;">Concurrency</div>
+    </div>
+    <div class="gantt-row">
+      <div class="gantt-label">6. Reporting v1<small>Engineering</small></div>
+      <div class="gantt-bar" style="grid-column: 6 / 7;">Reporting</div>
+    </div>
+    <div class="gantt-row">
+      <div class="gantt-label">7. Pilot go‑live<small>Product + Ops + Dealer</small></div>
+      <div class="gantt-bar live" style="grid-column: 7 / 11;">Live pilot</div>
+    </div>
+    <div class="gantt-row">
+      <div class="gantt-label">8. Engineering handoff<small>Eng → receiving team</small></div>
+      <div class="gantt-bar handoff" style="grid-column: 11 / 13;">Handoff</div>
+    </div>
+    <div class="gantt-row">
+      <div class="gantt-label">AWS production stand‑up<small>Receiving team</small></div>
+      <div class="gantt-bar aws" style="grid-column: 13 / 21;">AWS production</div>
+    </div>
+  </div>
+
+  <div class="gantt-legend">
+    <span><i style="background: var(--accent);"></i> Engineering / build</span>
+    <span><i style="background: var(--maybe);"></i> Decision gate</span>
+    <span><i style="background: var(--good);"></i> Live operation</span>
+    <span><i style="background: var(--warn);"></i> Handoff</span>
+    <span><i style="background: #334155;"></i> Production stand‑up</span>
+  </div>
+</div>
+
+<h2>Summary table</h2>
+<table>
+  <thead>
+    <tr><th>#</th><th>Phase</th><th>Effort</th><th>Gates next</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>1</td><td>Internal demo</td><td>~1 day</td><td>Leadership go‑ahead</td></tr>
+    <tr><td>2</td><td>Lifecycle signoff</td><td>~3 days</td><td>Policy locked, opt‑in path clear</td></tr>
+    <tr><td>3</td><td>Deploy prototype</td><td>~3 days</td><td>Cloud URL with login</td></tr>
+    <tr><td>4</td><td>Find pilot dealer</td><td>~2–4 wk</td><td>Signed pilot, customer + slot data</td></tr>
+    <tr><td>5</td><td>Concurrency &amp; durability</td><td>~1 wk</td><td>Survives daily volume</td></tr>
+    <tr><td>6</td><td>Reporting v1</td><td>~1 wk</td><td>Dashboard + weekly dealer report</td></tr>
+    <tr><td>7</td><td>Pilot go‑live</td><td>~4 wk live</td><td>30 days clean, case studies</td></tr>
+    <tr><td>8</td><td>Engineering handoff</td><td>~2 wk</td><td>Receiving team owns it</td></tr>
+    <tr><td>—</td><td>AWS production stand‑up</td><td>~6–8 wk</td><td>HA + compliance ready</td></tr>
+  </tbody>
+</table>
+
+<footer>
+  Companion to the <em>Service Booking — How It Works</em> lifecycle one‑pager. Both should be reviewed together.
+</footer>
+
+</main>
+</body>
+</html>

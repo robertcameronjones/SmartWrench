@@ -1,0 +1,77 @@
+# Render blueprint for the Guidepoint Maintenance 2.0 simulator.
+#
+# One web service, one persistent disk for runtime data
+# (case files, SMS history, routing, event logs).
+#
+# Secrets (Twilio / OpenRouter / ElevenLabs) are NOT in this file.
+# They are entered once in the Render dashboard for this service.
+#
+# After first deploy:
+#   1. Note the public URL Render assigns (e.g. kate-simulator.onrender.com).
+#   2. Set PUBLIC_BASE_URL to that URL in the dashboard, redeploy.
+#   3. Update Twilio's "A MESSAGE COMES IN" webhook to
+#      https://<your-url>/sms (POST).
+
+services:
+  - type: web
+    name: kate-simulator
+    runtime: python
+    plan: starter            # $7/mo. Free tier sleeps and breaks Twilio webhooks.
+    autoDeploy: true         # redeploy on push to the connected branch
+    healthCheckPath: /
+
+    buildCommand: |
+      pip install --upgrade pip
+      pip install -e ./11Labs \
+                  -e ./prompt_composer \
+                  -e ./llm \
+                  -e ./sms \
+                  -e ./sms_adapter \
+                  -e ./simulator
+
+    # PROJECT_ROOT points at 11Labs/ where config/ + fixtures/ + the
+    # mounted data/ disk all live. --host 0.0.0.0 so Render's load
+    # balancer can reach us; --port $PORT honors Render's port assignment.
+    startCommand: python -m simulator --project-root 11Labs --host 0.0.0.0 --port $PORT
+
+    envVars:
+      # Pin Python so behavior matches local dev (3.13.x).
+      - key: PYTHON_VERSION
+        value: 3.13.3
+
+      # Public URL of the deployed service. Set this AFTER first
+      # deploy once Render tells you the hostname. The SMS webhook
+      # uses it to validate Twilio signatures.
+      - key: PUBLIC_BASE_URL
+        sync: false
+
+      # --- Twilio (set in dashboard) ---
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_FROM_NUMBER
+        sync: false
+
+      # --- LLM (OpenRouter via LiteLLM) (set in dashboard) ---
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: LLM_MODEL
+        sync: false              # e.g. openrouter/qwen/qwen3.6-35b-a3b
+
+      # --- ElevenLabs (set in dashboard) ---
+      - key: ELEVENLABS_API_KEY
+        sync: false
+      - key: ELEVENLABS_AGENT_ID
+        sync: false
+      - key: ELEVENLABS_AGENT_PHONE_NUMBER_ID
+        sync: false
+
+    # Persistent disk for runtime data (cases, SMS history, routing,
+    # event logs). Mounted at the path the app already writes to, so
+    # no code change is needed. 1 GB is way more than we need; it's
+    # the smallest billable size (~$0.25/mo).
+    disk:
+      name: kate-data
+      mountPath: /opt/render/project/src/11Labs/data
+      sizeGB: 1

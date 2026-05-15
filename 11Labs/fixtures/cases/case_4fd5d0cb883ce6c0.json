@@ -1,0 +1,148 @@
+{
+  "case_id": "case_4fd5d0cb883ce6c0",
+  "trigger_id": "trig_73c86d25e848",
+  "correlation_id": "corr_2a31da94681a",
+  "customer": {
+    "id": "cust_jones_robert",
+    "first_name": "Robert",
+    "last_name": "Jones",
+    "phone": "+13139095330",
+    "opt_status": "opted_in",
+    "preferred_channel": "voice",
+    "timezone": "America/Detroit"
+  },
+  "dealer": {
+    "id": "dealer_village_jeep_royal_oak",
+    "name": "Village Jeep",
+    "phone": "+12487813798",
+    "address": "31200 Woodward Ave, Royal Oak, MI 48073",
+    "ride_radius_miles": 10
+  },
+  "vehicle": {
+    "vin": "1C4RJFBG5NC123456",
+    "owner_id": "cust_jones_robert",
+    "year": 2025,
+    "make": "Jeep",
+    "model": "Grand Cherokee",
+    "odometer_miles": 32180,
+    "current_location": {
+      "latitude": 42.4895,
+      "longitude": -83.1446,
+      "description": "Owner's home, driveway"
+    }
+  },
+  "service_event": {
+    "type": "maintenance",
+    "summary": "rotate tires",
+    "narrative": ""
+  },
+  "offered_slots": [
+    {
+      "id": "slot_2026_05_12_0830",
+      "starts_at": "2026-05-12T12:30:00Z",
+      "display": "Tuesday, May 12, 2026 - 8:30 AM"
+    },
+    {
+      "id": "slot_2026_05_12_1330",
+      "starts_at": "2026-05-12T17:30:00Z",
+      "display": "Tuesday, May 12, 2026 - 1:30 PM"
+    },
+    {
+      "id": "slot_2026_05_13_0900",
+      "starts_at": "2026-05-13T13:00:00Z",
+      "display": "Wednesday, May 13, 2026 - 9:00 AM"
+    }
+  ],
+  "state": "booked",
+  "attempt_count": 1,
+  "next_attempt_at": null,
+  "call_attempts": [
+    {
+      "attempt_number": 1,
+      "outcome": {
+        "result": "answered",
+        "business_outcome": "booked",
+        "booked_slot_id": "slot_chosen_data_collection_id='scheduled_date' value=None json_schema=LiteralJsonSchemaProperty(type='string', description='The confirmed date of the service appointment in YYYYMMDD format.', enum=None, is_system_provided=False, dynamic_variable='', constant_value='') rationale='The conversation does not contain any information about a confirmed service appointment date, making extraction impossible.'_data_collection_id='scheduled_time' value=None json_schema=LiteralJsonSchemaProperty(type='string', description='The confirmed time of the service appointment in HHMM (24hour) format.', enum=None, is_system_provided=False, dynamic_variable='', constant_value='') rationale='La transcripción no proporciona información sobre la hora confirmada de la cita de servicio.'",
+        "elevenlabs_conversation_id": "conv_0801krbx6v41f1ps17qxtwtyq1vb",
+        "started_at": "2026-05-11T16:16:32.214354Z",
+        "ended_at": "2026-05-11T16:18:04.388334Z",
+        "duration_seconds": 24.0,
+        "transcript": "[   1.0s] Customer: Hello.\n[   7.0s] Kate: Hi, this is Kate calling about your 2025 Jeep Grand Cherokee. Our system...\n[  13.0s] Customer: Yes, she's welcome.",
+        "recording_url": "",
+        "error_detail": ""
+      }
+    }
+  ],
+  "events": [
+    {
+      "event_id": "evt_24b589d0eb40",
+      "case_id": "case_4fd5d0cb883ce6c0",
+      "correlation_id": "corr_2a31da94681a",
+      "attempt_number": null,
+      "timestamp": "2026-05-11T16:16:32.213087Z",
+      "source": "system",
+      "level": "info",
+      "event": "case.created",
+      "detail": "trigger=trig_73c86d25e848"
+    },
+    {
+      "event_id": "evt_681b4fbfe3ee",
+      "case_id": "case_4fd5d0cb883ce6c0",
+      "correlation_id": "corr_2a31da94681a",
+      "attempt_number": null,
+      "timestamp": "2026-05-11T16:16:32.213943Z",
+      "source": "system",
+      "level": "info",
+      "event": "case.calling",
+      "detail": "attempt 1"
+    },
+    {
+      "event_id": "evt_936cd70dcc9c",
+      "case_id": "case_4fd5d0cb883ce6c0",
+      "correlation_id": "corr_2a31da94681a",
+      "attempt_number": 1,
+      "timestamp": "2026-05-11T16:16:32.214362Z",
+      "source": "system",
+      "level": "info",
+      "event": "call.dialing",
+      "detail": "+13139095330"
+    },
+    {
+      "event_id": "evt_8370bbbc1501",
+      "case_id": "case_4fd5d0cb883ce6c0",
+      "correlation_id": "corr_2a31da94681a",
+      "attempt_number": 1,
+      "timestamp": "2026-05-11T16:16:32.543672Z",
+      "source": "elevenlabs",
+      "level": "info",
+      "event": "call.placed",
+      "detail": "conversation_id=conv_0801krbx6v41f1ps17qxtwtyq1vb"
+    },
+    {
+      "event_id": "evt_7e052cd4dc0f",
+      "case_id": "case_4fd5d0cb883ce6c0",
+      "correlation_id": "corr_2a31da94681a",
+      "attempt_number": 1,
+      "timestamp": "2026-05-11T16:18:04.388877Z",
+      "source": "elevenlabs",
+      "level": "info",
+      "event": "conversation.transcript_received",
+      "detail": "conversation_id=conv_0801krbx6v41f1ps17qxtwtyq1vb turns=3 duration=24.0s status=done"
+    },
+    {
+      "event_id": "evt_9f82ae63f7ce",
+      "case_id": "case_4fd5d0cb883ce6c0",
+      "correlation_id": "corr_2a31da94681a",
+      "attempt_number": null,
+      "timestamp": "2026-05-11T16:18:04.393176Z",
+      "source": "system",
+      "level": "info",
+      "event": "case.booked",
+      "detail": "booked slot slot_chosen_data_collection_id='scheduled_date' value=None json_schema=LiteralJsonSchemaProperty(type='string', description='The confirmed date of the service appointment in YYYYMMDD format.', enum=None, is_system_provided=False, dynamic_variable='', constant_value='') rationale='The conversation does not contain any information about a confirmed service appointment date, making extraction impossible.'_data_collection_id='scheduled_time' value=None json_schema=LiteralJsonSchemaProperty(type='string', description='The confirmed time of the service appointment in HHMM (24hour) format.', enum=None, is_system_provided=False, dynamic_variable='', constant_value='') rationale='La transcripción no proporciona información sobre la hora confirmada de la cita de servicio.'"
+    }
+  ],
+  "outcome_detail": "booked slot slot_chosen_data_collection_id='scheduled_date' value=None json_schema=LiteralJsonSchemaProperty(type='string', description='The confirmed date of the service appointment in YYYYMMDD format.', enum=None, is_system_provided=False, dynamic_variable='', constant_value='') rationale='The conversation does not contain any information about a confirmed service appointment date, making extraction impossible.'_data_collection_id='scheduled_time' value=None json_schema=LiteralJsonSchemaProperty(type='string', description='The confirmed time of the service appointment in HHMM (24hour) format.', enum=None, is_system_provided=False, dynamic_variable='', constant_value='') rationale='La transcripción no proporciona información sobre la hora confirmada de la cita de servicio.'",
+  "booked_slot_id": "slot_chosen_data_collection_id='scheduled_date' value=None json_schema=LiteralJsonSchemaProperty(type='string', description='The confirmed date of the service appointment in YYYYMMDD format.', enum=None, is_system_provided=False, dynamic_variable='', constant_value='') rationale='The conversation does not contain any information about a confirmed service appointment date, making extraction impossible.'_data_collection_id='scheduled_time' value=None json_schema=LiteralJsonSchemaProperty(type='string', description='The confirmed time of the service appointment in HHMM (24hour) format.', enum=None, is_system_provided=False, dynamic_variable='', constant_value='') rationale='La transcripción no proporciona información sobre la hora confirmada de la cita de servicio.'",
+  "created_at": "2026-05-11T16:16:32.212454Z",
+  "closed_at": "2026-05-11T16:18:04.392299Z"
+}

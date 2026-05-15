@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "llm"
+version = "0.1.0"
+description = "LiteLLM wrapper. One-shot completion lib for adapters; streaming CLI for humans."
+readme = "README.md"
+requires-python = ">=3.12"
+
+dependencies = [
+  "litellm>=1.55.0",
+  "python-dotenv>=1.0.1",
+]
+
+[project.scripts]
+llm-chat = "llm.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

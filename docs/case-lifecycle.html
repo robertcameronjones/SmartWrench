@@ -1,0 +1,390 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Guidepoint Maintenance 2.0 Agentic — How It Works</title>
+<style>
+  :root {
+    --ink: #0f172a;
+    --ink-soft: #475569;
+    --line: #e2e8f0;
+    --bg: #ffffff;
+    --bg-soft: #f8fafc;
+    --accent: #1d4ed8;
+    --good: #15803d;
+    --warn: #b45309;
+    --bad: #b91c1c;
+    --maybe: #6d28d9;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  }
+  main {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 48px 32px 72px;
+  }
+  header {
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 24px;
+    margin-bottom: 32px;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+  }
+  .logo {
+    flex: 0 0 auto;
+    height: 56px;
+    display: inline-flex;
+    align-items: center;
+  }
+  .logo img {
+    height: 100%;
+    width: auto;
+    display: block;
+  }
+  .header-text { flex: 1; }
+  h1 {
+    font-size: 28px;
+    margin: 0 0 6px;
+    letter-spacing: -0.01em;
+  }
+  .eyebrow {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    color: var(--accent);
+    text-transform: uppercase;
+    margin-bottom: 4px;
+  }
+  .subtitle {
+    color: var(--ink-soft);
+    font-size: 15px;
+  }
+  h2 {
+    font-size: 18px;
+    margin: 36px 0 12px;
+    letter-spacing: -0.01em;
+  }
+  p { margin: 0 0 12px; }
+  ul { margin: 0 0 12px; padding-left: 22px; }
+  li { margin-bottom: 4px; }
+  .lede {
+    font-size: 16px;
+    color: var(--ink-soft);
+  }
+  .triggers {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    margin: 8px 0 4px;
+  }
+  .trigger-card {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 14px 16px;
+    background: var(--bg-soft);
+  }
+  .trigger-card h3 {
+    margin: 0 0 4px;
+    font-size: 14px;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  .trigger-card p {
+    margin: 0;
+    color: var(--ink-soft);
+    font-size: 14px;
+  }
+
+  /* flow */
+  .flow {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 0;
+    margin: 16px 0 8px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    overflow: hidden;
+    background: var(--bg-soft);
+  }
+  .step {
+    padding: 14px 12px;
+    border-right: 1px solid var(--line);
+    position: relative;
+  }
+  .step:last-child { border-right: 0; }
+  .step .num {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--accent);
+    letter-spacing: 0.08em;
+  }
+  .step .name {
+    font-weight: 600;
+    margin: 2px 0 4px;
+    font-size: 15px;
+  }
+  .step .desc {
+    color: var(--ink-soft);
+    font-size: 13px;
+    line-height: 1.4;
+  }
+  .arrow-row {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    color: var(--ink-soft);
+    font-size: 18px;
+    margin: 4px 0 0;
+    text-align: center;
+  }
+  .arrow-row span { padding: 0 0 8px; }
+
+  /* outcomes */
+  .outcomes {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+    margin-top: 8px;
+  }
+  .outcome {
+    border: 1px solid var(--line);
+    border-left: 4px solid var(--ink-soft);
+    border-radius: 8px;
+    padding: 14px 16px;
+    background: var(--bg);
+  }
+  .outcome.good { border-left-color: var(--good); }
+  .outcome.warn { border-left-color: var(--warn); }
+  .outcome.bad  { border-left-color: var(--bad); }
+  .outcome.maybe { border-left-color: var(--maybe); }
+  .outcome h3 {
+    margin: 0 0 6px;
+    font-size: 15px;
+  }
+  .outcome p {
+    margin: 0;
+    color: var(--ink-soft);
+    font-size: 14px;
+  }
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    margin-right: 6px;
+  }
+  .badge.good  { background: #dcfce7; color: var(--good); }
+  .badge.warn  { background: #fef3c7; color: var(--warn); }
+  .badge.bad   { background: #fee2e2; color: var(--bad); }
+  .badge.maybe { background: #ede9fe; color: var(--maybe); }
+
+  /* channel & timing */
+  .pair {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+  .panel {
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 16px 18px;
+    background: var(--bg-soft);
+  }
+  .panel h3 {
+    margin: 0 0 6px;
+    font-size: 15px;
+  }
+  .panel ul { margin: 8px 0 0; }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 8px 0 0;
+    font-size: 14px;
+  }
+  th, td {
+    text-align: left;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--line);
+  }
+  th {
+    color: var(--ink-soft);
+    font-weight: 600;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+
+  footer {
+    margin-top: 48px;
+    padding-top: 18px;
+    border-top: 1px solid var(--line);
+    color: var(--ink-soft);
+    font-size: 13px;
+  }
+
+  @media (max-width: 720px) {
+    .flow, .arrow-row { grid-template-columns: repeat(2, 1fr); }
+    .triggers, .outcomes, .pair { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<main>
+
+<header>
+  <div class="logo">
+    <img src="logo.png" alt="Guidepoint Systems" />
+  </div>
+  <div class="header-text">
+    <div class="eyebrow">Guidepoint Maintenance 2.0 Agentic</div>
+    <h1>Service Booking — How It Works</h1>
+    <p class="subtitle">A plain‑English walkthrough of how Kate gets a customer from a detected service need to a confirmed appointment, and what happens after.</p>
+  </div>
+</header>
+
+<p class="lede">
+  Kate is the friendly scheduling assistant for our dealer partners. When a customer's vehicle needs service,
+  Kate reaches out, helps them pick a time, reminds them the day before, and follows up after the appointment.
+  She works over <strong>voice</strong> or <strong>SMS</strong>, whichever the customer prefers.
+</p>
+
+<h2>Where the work begins — Triggers</h2>
+<p>A new case opens when something tells us a vehicle needs attention. The three trigger sources:</p>
+<div class="triggers">
+  <div class="trigger-card">
+    <h3>Recall</h3>
+    <p>A manufacturer recall applies to one of the dealer's vehicles.</p>
+  </div>
+  <div class="trigger-card">
+    <h3>DTC</h3>
+    <p>The vehicle's onboard diagnostic system flags a fault code that needs attention.</p>
+  </div>
+  <div class="trigger-card">
+    <h3>Regular maintenance due</h3>
+    <p>Scheduled service is coming up based on time, mileage, or manufacturer interval.</p>
+  </div>
+</div>
+<p style="margin-top:14px">
+  Triggers go into a <strong>queue</strong>. We work one case per customer at a time — if a customer already has an open case,
+  any new trigger for them waits its turn.
+</p>
+
+<h2>The main path — what a happy case looks like</h2>
+
+<div class="flow">
+  <div class="step">
+    <div class="num">STEP 1</div>
+    <div class="name">Contact</div>
+    <div class="desc">Kate reaches out and the customer responds.</div>
+  </div>
+  <div class="step">
+    <div class="num">STEP 2</div>
+    <div class="name">Book</div>
+    <div class="desc">Customer agrees and picks an open slot.</div>
+  </div>
+  <div class="step">
+    <div class="num">STEP 3</div>
+    <div class="name">Confirm</div>
+    <div class="desc">Kate repeats the slot back; customer confirms.</div>
+  </div>
+  <div class="step">
+    <div class="num">STEP 4</div>
+    <div class="name">Remind</div>
+    <div class="desc">24 hours before the appointment, Kate texts a reminder. Customer can confirm, cancel, or reschedule.</div>
+  </div>
+  <div class="step">
+    <div class="num">STEP 5</div>
+    <div class="name">Arrive</div>
+    <div class="desc">Day of: Guidepoint's GPS confirms arrival at the dealership. Up until the appointment time, customer can still text in to reschedule.</div>
+  </div>
+  <div class="step">
+    <div class="num">STEP 6</div>
+    <div class="name">Feedback</div>
+    <div class="desc">After the appointment, Kate texts to ask how it went.</div>
+  </div>
+</div>
+<div class="arrow-row">
+  <span>→</span><span>→</span><span>→</span><span>→</span><span>→</span><span>✓</span>
+</div>
+
+<h2>How a case can end</h2>
+<div class="outcomes">
+  <div class="outcome good">
+    <h3><span class="badge good">Yes</span>Booked &amp; serviced</h3>
+    <p>Customer agreed, came in, got serviced. We close the case after a feedback note.</p>
+  </div>
+  <div class="outcome bad">
+    <h3><span class="badge bad">No</span>Customer declined</h3>
+    <p>The customer says no — at any step. We thank them and close the case. We don't reach out again about this same issue.</p>
+  </div>
+  <div class="outcome maybe">
+    <h3><span class="badge maybe">Maybe</span>No firm answer</h3>
+    <p>The customer engaged but didn't commit. We give them <strong>24 hours</strong>, then try once more. If still no firm answer, we close the case.</p>
+  </div>
+  <div class="outcome warn">
+    <h3><span class="badge warn">Silent</span>No response at all</h3>
+    <p>For SMS, we wait <strong>24 hours</strong>, send one more message, then close after another <strong>24 hours</strong> of silence (48 hours total).</p>
+  </div>
+  <div class="outcome maybe">
+    <h3><span class="badge maybe">Reschedule</span>Customer wants a different time</h3>
+    <p>At the reminder, or any time before the appointment, the customer can ask to move it. We pick a new slot under the <strong>same case</strong> and reset the reminder for the new date.</p>
+  </div>
+  <div class="outcome warn">
+    <h3><span class="badge warn">Cancelled</span>Customer cancels the appointment</h3>
+    <p>If the customer cancels outright (not a reschedule), we treat it as a decline and close the case.</p>
+  </div>
+  <div class="outcome bad">
+    <h3><span class="badge bad">No-show</span>Vehicle didn't arrive</h3>
+    <p>Our GPS sees no arrival at the dealership during the appointment window. Case closes. (No automatic reach‑back, today.)</p>
+  </div>
+</div>
+
+<h2>How Kate uses voice and SMS</h2>
+<div class="pair">
+  <div class="panel">
+    <h3>The customer chooses the channel</h3>
+    <p>Each customer has a preferred way to be reached — voice or SMS. Kate uses that channel for the booking conversation.</p>
+  </div>
+  <div class="panel">
+    <h3>Voice gets one phone call</h3>
+    <p>If Kate calls and the conversation doesn't land in a clear yes or no, the rest of the case continues over <strong>SMS</strong>. We never call a second time.</p>
+  </div>
+</div>
+<p style="margin-top:14px">
+  Reminders, arrival check, and feedback are <strong>always SMS</strong> — they're short, async, and respectful of people's time.
+</p>
+
+<h2>Timing at a glance</h2>
+<table>
+  <thead>
+    <tr><th>Moment</th><th>What happens</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Trigger</td><td>Case opens; Kate reaches out within minutes.</td></tr>
+    <tr><td>+24 hours of silence</td><td>One nudge.</td></tr>
+    <tr><td>+48 hours of silence</td><td>Case closes (timed out).</td></tr>
+    <tr><td>24 hours before appointment</td><td>Reminder sent.</td></tr>
+    <tr><td>Appointment day</td><td>GPS confirms arrival (or absence) at the dealership.</td></tr>
+    <tr><td>After appointment</td><td>Feedback ask. One nudge after 24 hours, then close.</td></tr>
+  </tbody>
+</table>
+
+<footer>
+  This describes the customer‑facing flow. Operations team has additional dashboards for queue depth, case state, and channel mix.
+</footer>
+
+</main>
+</body>
+</html>

@@ -1,0 +1,13 @@
+{
+  "vin": "1C4RJFBG5NC123456",
+  "owner_id": "cust_jones_robert",
+  "year": 2026,
+  "make": "Jeep",
+  "model": "Grand Cherokee",
+  "odometer_miles": 32180,
+  "current_location": {
+    "latitude": 42.4895,
+    "longitude": -83.1446,
+    "description": "Owner's home, driveway"
+  }
+}

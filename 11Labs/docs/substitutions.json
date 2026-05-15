@@ -1,0 +1,18 @@
+{
+  "_comment": "Two things: (1) 'preamble' is text prepended to the output prompt (use to expose values the LLM needs but the spec doesn't mention). Leave empty to skip. (2) 'substitutions' is an ordered list of [literal_string, replacement] pairs applied to source-spec.txt. Order matters: longer/more-specific phrases first.",
+
+  "preamble": "",
+
+  "substitutions": [
+    ["2025 Jeep Grand Cherokee", "{{vehicle_year}} {{vehicle_make}} {{vehicle_model}}"],
+    ["regularl maintenance", "{{service_reason_summary}}"],
+    ["Village Jeep", "{{dealer_name}}"],
+    ["10 miles", "{{ride_radius_miles}} miles"],
+
+    ["If DTC:", "If {{service_reason_type}}=\"dtc\":"],
+    ["If Recall:", "If {{service_reason_type}}=\"recall\":"],
+    ["If Regularly Scheduled maintenance.", "If {{service_reason_type}}=\"maintenance\":"],
+    ["If recall:", "If {{service_reason_type}}=\"recall\":"],
+    ["If maintenance:", "If {{service_reason_type}}=\"maintenance\":"]
+  ]
+}

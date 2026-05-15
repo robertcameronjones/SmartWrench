@@ -1,0 +1,148 @@
+{
+  "case_id": "case_ea79ba1d220e47f6",
+  "trigger_id": "trig_aa8a481af107",
+  "correlation_id": "corr_20c5ec568686",
+  "customer": {
+    "id": "cust_jones_robert",
+    "first_name": "Robert",
+    "last_name": "Jones",
+    "phone": "+13139095330",
+    "opt_status": "opted_in",
+    "preferred_channel": "voice",
+    "timezone": "America/Detroit"
+  },
+  "dealer": {
+    "id": "dealer_village_jeep_royal_oak",
+    "name": "Village Jeep",
+    "phone": "+12487813798",
+    "address": "31200 Woodward Ave, Royal Oak, MI 48073",
+    "ride_radius_miles": 10
+  },
+  "vehicle": {
+    "vin": "1C4RJFBG5NC123456",
+    "owner_id": "cust_jones_robert",
+    "year": 2025,
+    "make": "Jeep",
+    "model": "Grand Cherokee",
+    "odometer_miles": 32180,
+    "current_location": {
+      "latitude": 42.4895,
+      "longitude": -83.1446,
+      "description": "Owner's home, driveway"
+    }
+  },
+  "service_event": {
+    "type": "maintenance",
+    "summary": "rotate tires",
+    "narrative": ""
+  },
+  "offered_slots": [
+    {
+      "id": "slot_2026_05_12_0830",
+      "starts_at": "2026-05-12T12:30:00Z",
+      "display": "Tuesday, May 12, 2026 - 8:30 AM"
+    },
+    {
+      "id": "slot_2026_05_12_1330",
+      "starts_at": "2026-05-12T17:30:00Z",
+      "display": "Tuesday, May 12, 2026 - 1:30 PM"
+    },
+    {
+      "id": "slot_2026_05_13_0900",
+      "starts_at": "2026-05-13T13:00:00Z",
+      "display": "Wednesday, May 13, 2026 - 9:00 AM"
+    }
+  ],
+  "state": "booked",
+  "attempt_count": 1,
+  "next_attempt_at": null,
+  "call_attempts": [
+    {
+      "attempt_number": 1,
+      "outcome": {
+        "result": "answered",
+        "business_outcome": "booked",
+        "booked_slot_id": "slot_chosen_data_collection_id='scheduled_date' value=None json_schema=LiteralJsonSchemaProperty(type='string', description='The confirmed date of the service appointment in YYYYMMDD format.', enum=None, is_system_provided=False, dynamic_variable='', constant_value='') rationale='The user has not confirmed any of the proposed dates for the service appointment, indicating that no date has been finalized.'_data_collection_id='scheduled_time' value=None json_schema=LiteralJsonSchemaProperty(type='string', description='The confirmed time of the service appointment in HHMM (24hour) format.', enum=None, is_system_provided=False, dynamic_variable='', constant_value='') rationale='The user did not confirm any of the proposed service appointment times, repeatedly asking the agent to wait or repeat the options.'",
+        "elevenlabs_conversation_id": "conv_1101krbxzvtjf5k8p4kr8dz9rayz",
+        "started_at": "2026-05-11T16:30:12.116297Z",
+        "ended_at": "2026-05-11T16:32:05.572459Z",
+        "duration_seconds": 86.0,
+        "transcript": "[   1.0s] Customer: Hello.\n[   5.0s] Kate: Hi, this is Kate calling about your 2025 Jeep Grand Cherokee. Our system has detected that it needs service for maintenance. I'd love to help you get that scheduled at Village Jeep. Does that work for you?\n[  16.0s] Customer: Sure.\n[  18.0s] Kate: Wonderful! I have a few times available for you. How about Tuesday, May twelfth, at eight thirty in the morning, or Tuesday, May twelfth, at one thirty in the afternoon? We also have Wednesday, May thirteenth, at nine in the morning. Which of...\n[  29.0s] Customer: What?\n[  31.0s] Kate: Apologies, I...\n[  32.0s] Customer: One sec. One sec.\n[  41.0s] Kate: Of course, take your time. I'm here when you're ready.\n[  45.0s] Customer: One sec.\n[  48.0s] Kate: No problem at all. I'll be right here.\n[  54.0s] Customer: Repeat them, please.\n[  59.0s] Kate: Certainly! The available times are:\n\nTuesday, May twelfth, at eight thirty in the morning.\nTuesday, May twelfth, at one thirty in the afternoon.\nWednesday, May thirteenth, at nine in the morning.\n\nWhich of those works best for you?\n[  72.0s] Customer: One sec\n[  81.0s] Kate: No problem at all. I'll wait.",
+        "recording_url": "",
+        "error_detail": ""
+      }
+    }
+  ],
+  "events": [
+    {
+      "event_id": "evt_d2eaac5c5e13",
+      "case_id": "case_ea79ba1d220e47f6",
+      "correlation_id": "corr_20c5ec568686",
+      "attempt_number": null,
+      "timestamp": "2026-05-11T16:30:12.114511Z",
+      "source": "system",
+      "level": "info",
+      "event": "case.created",
+      "detail": "trigger=trig_aa8a481af107"
+    },
+    {
+      "event_id": "evt_bcc3e25d763f",
+      "case_id": "case_ea79ba1d220e47f6",
+      "correlation_id": "corr_20c5ec568686",
+      "attempt_number": null,
+      "timestamp": "2026-05-11T16:30:12.115785Z",
+      "source": "system",
+      "level": "info",
+      "event": "case.calling",
+      "detail": "attempt 1"
+    },
+    {
+      "event_id": "evt_c80ca289269b",
+      "case_id": "case_ea79ba1d220e47f6",
+      "correlation_id": "corr_20c5ec568686",
+      "attempt_number": 1,
+      "timestamp": "2026-05-11T16:30:12.116310Z",
+      "source": "system",
+      "level": "info",
+      "event": "call.dialing",
+      "detail": "+13139095330"
+    },
+    {
+      "event_id": "evt_6045905a59b2",
+      "case_id": "case_ea79ba1d220e47f6",
+      "correlation_id": "corr_20c5ec568686",
+      "attempt_number": 1,
+      "timestamp": "2026-05-11T16:30:12.516051Z",
+      "source": "elevenlabs",
+      "level": "info",
+      "event": "call.placed",
+      "detail": "conversation_id=conv_1101krbxzvtjf5k8p4kr8dz9rayz"
+    },
+    {
+      "event_id": "evt_ec8a18fec28d",
+      "case_id": "case_ea79ba1d220e47f6",
+      "correlation_id": "corr_20c5ec568686",
+      "attempt_number": 1,
+      "timestamp": "2026-05-11T16:32:05.572729Z",
+      "source": "elevenlabs",
+      "level": "info",
+      "event": "conversation.transcript_received",
+      "detail": "conversation_id=conv_1101krbxzvtjf5k8p4kr8dz9rayz turns=14 duration=86.0s status=done"
+    },
+    {
+      "event_id": "evt_685ca2e36ffb",
+      "case_id": "case_ea79ba1d220e47f6",
+      "correlation_id": "corr_20c5ec568686",
+      "attempt_number": null,
+      "timestamp": "2026-05-11T16:32:05.574251Z",
+      "source": "system",
+      "level": "info",
+      "event": "case.booked",
+      "detail": "booked slot slot_chosen_data_collection_id='scheduled_date' value=None json_schema=LiteralJsonSchemaProperty(type='string', description='The confirmed date of the service appointment in YYYYMMDD format.', enum=None, is_system_provided=False, dynamic_variable='', constant_value='') rationale='The user has not confirmed any of the proposed dates for the service appointment, indicating that no date has been finalized.'_data_collection_id='scheduled_time' value=None json_schema=LiteralJsonSchemaProperty(type='string', description='The confirmed time of the service appointment in HHMM (24hour) format.', enum=None, is_system_provided=False, dynamic_variable='', constant_value='') rationale='The user did not confirm any of the proposed service appointment times, repeatedly asking the agent to wait or repeat the options.'"
+    }
+  ],
+  "outcome_detail": "booked slot slot_chosen_data_collection_id='scheduled_date' value=None json_schema=LiteralJsonSchemaProperty(type='string', description='The confirmed date of the service appointment in YYYYMMDD format.', enum=None, is_system_provided=False, dynamic_variable='', constant_value='') rationale='The user has not confirmed any of the proposed dates for the service appointment, indicating that no date has been finalized.'_data_collection_id='scheduled_time' value=None json_schema=LiteralJsonSchemaProperty(type='string', description='The confirmed time of the service appointment in HHMM (24hour) format.', enum=None, is_system_provided=False, dynamic_variable='', constant_value='') rationale='The user did not confirm any of the proposed service appointment times, repeatedly asking the agent to wait or repeat the options.'",
+  "booked_slot_id": "slot_chosen_data_collection_id='scheduled_date' value=None json_schema=LiteralJsonSchemaProperty(type='string', description='The confirmed date of the service appointment in YYYYMMDD format.', enum=None, is_system_provided=False, dynamic_variable='', constant_value='') rationale='The user has not confirmed any of the proposed dates for the service appointment, indicating that no date has been finalized.'_data_collection_id='scheduled_time' value=None json_schema=LiteralJsonSchemaProperty(type='string', description='The confirmed time of the service appointment in HHMM (24hour) format.', enum=None, is_system_provided=False, dynamic_variable='', constant_value='') rationale='The user did not confirm any of the proposed service appointment times, repeatedly asking the agent to wait or repeat the options.'",
+  "created_at": "2026-05-11T16:30:12.113993Z",
+  "closed_at": "2026-05-11T16:32:05.574004Z"
+}

@@ -1,0 +1,420 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Guidepoint Maintenance 2.0 — Dealer Scheduling Work Package</title>
+<style>
+  :root {
+    --ink: #0f172a;
+    --ink-soft: #475569;
+    --line: #e2e8f0;
+    --bg: #ffffff;
+    --bg-soft: #f8fafc;
+    --accent: #1d4ed8;
+    --good: #15803d;
+    --warn: #b45309;
+    --maybe: #6d28d9;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  }
+  main {
+    max-width: 980px;
+    margin: 0 auto;
+    padding: 48px 32px 72px;
+  }
+  header {
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 24px;
+    margin-bottom: 32px;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+  }
+  .logo { flex: 0 0 auto; height: 56px; display: inline-flex; align-items: center; }
+  .logo img { height: 100%; width: auto; display: block; }
+  .header-text { flex: 1; }
+  .eyebrow {
+    font-size: 11px; font-weight: 700; letter-spacing: 0.12em;
+    color: var(--accent); text-transform: uppercase; margin-bottom: 4px;
+  }
+  h1 { font-size: 28px; margin: 0 0 6px; letter-spacing: -0.01em; }
+  .subtitle { color: var(--ink-soft); font-size: 15px; }
+
+  h2 {
+    font-size: 18px;
+    margin: 36px 0 12px;
+    letter-spacing: -0.01em;
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 4px;
+  }
+  h3 {
+    font-size: 15px;
+    margin: 18px 0 6px;
+  }
+  p { margin: 0 0 12px; }
+  ul, ol { margin: 0 0 12px; padding-left: 22px; }
+  li { margin-bottom: 4px; }
+  code {
+    font: 12.5px/1.4 ui-monospace, SF Mono, Consolas, monospace;
+    background: var(--bg-soft);
+    padding: 1px 5px;
+    border-radius: 4px;
+  }
+
+  .lede { font-size: 16px; color: var(--ink-soft); }
+
+  .summary-card {
+    border: 1px solid var(--line);
+    background: var(--bg-soft);
+    border-radius: 10px;
+    padding: 16px 20px;
+    margin: 12px 0 24px;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px 24px;
+    font-size: 14px;
+  }
+  .summary-card dt {
+    color: var(--ink-soft);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 2px;
+  }
+  .summary-card dd {
+    margin: 0;
+    font-weight: 600;
+  }
+
+  .step {
+    border: 1px solid var(--line);
+    border-left: 4px solid var(--accent);
+    border-radius: 10px;
+    padding: 14px 18px;
+    margin: 10px 0;
+    background: var(--bg-soft);
+  }
+  .step-head {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    margin-bottom: 4px;
+  }
+  .step-num {
+    flex: 0 0 auto;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    color: var(--accent);
+    text-transform: uppercase;
+  }
+  .step-name {
+    flex: 1;
+    font-size: 15px;
+    font-weight: 600;
+  }
+  .step p { margin: 6px 0 0; font-size: 14px; }
+  .step .why {
+    color: var(--ink-soft);
+    font-size: 13px;
+    margin-top: 4px;
+  }
+
+  .deliverable {
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 18px 20px;
+    margin: 12px 0;
+    background: #fff;
+  }
+  .deliverable.proof    { border-left: 4px solid var(--good); }
+  .deliverable.repeat   { border-left: 4px solid var(--maybe); }
+  .deliverable h3 { margin-top: 0; }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 8px 0 0;
+    font-size: 14px;
+  }
+  th, td {
+    text-align: left;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+  }
+  th {
+    color: var(--ink-soft);
+    font-weight: 600;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    background: var(--bg-soft);
+  }
+
+  .risk-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  .risk {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 12px 14px;
+    background: #fff;
+    font-size: 14px;
+  }
+  .risk h4 {
+    margin: 0 0 4px;
+    font-size: 13px;
+    color: var(--warn);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .risk p { margin: 0; color: var(--ink-soft); font-size: 13px; }
+
+  .accept {
+    border: 1px solid var(--good);
+    background: #f0fdf4;
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin: 8px 0;
+  }
+  .accept h4 {
+    margin: 0 0 6px;
+    color: var(--good);
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .accept ul { margin: 0; padding-left: 20px; }
+
+  footer {
+    margin-top: 48px;
+    padding-top: 18px;
+    border-top: 1px solid var(--line);
+    color: var(--ink-soft);
+    font-size: 13px;
+  }
+
+  @media (max-width: 720px) {
+    .summary-card { grid-template-columns: 1fr 1fr; }
+    .risk-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<main>
+
+<header>
+  <div class="logo">
+    <img src="logo.png" alt="Guidepoint Systems" />
+  </div>
+  <div class="header-text">
+    <div class="eyebrow">Guidepoint Maintenance 2.0 Agentic — Work Package 01</div>
+    <h1>Dealer Scheduling — Web Automation Proof of Concept</h1>
+    <p class="subtitle">Pilot dealer: Fox Taylor. Goal: book a real service appointment end‑to‑end through the dealer's existing public website.</p>
+  </div>
+</header>
+
+<dl class="summary-card">
+  <div><dt>Pilot dealer</dt><dd>Fox Taylor</dd></div>
+  <div><dt>Approach</dt><dd>Web scraping / browser automation</dd></div>
+  <div><dt>Effort estimate</dt><dd>~2 weeks</dd></div>
+  <div><dt>Output</dt><dd>POC report + repeatability demo</dd></div>
+</dl>
+
+<h2>1. Project</h2>
+
+<p class="lede">
+  Kate (the agent) needs to actually <em>book</em> the appointment she promises the customer. Until dealer
+  systems expose us a real API, the only way to do that reliably is to drive the dealer's public website the
+  way a human would. This work package proves we can do exactly that against a single live dealer — Fox
+  Taylor — and lays the pattern for adding more dealers later.
+</p>
+
+<h3>Objectives</h3>
+<p>For the Fox Taylor service scheduler, programmatically demonstrate the five steps of a real booking flow:</p>
+
+<div class="step">
+  <div class="step-head"><div class="step-num">Step 1</div><div class="step-name">Access the URL</div></div>
+  <p>Reach the Fox Taylor service scheduling page from a clean session, no human in the loop.</p>
+  <p class="why">Identifies: hosting platform (Xtime, MyKaarma, Tekion, dealer's own CMS), cookie/consent walls, geo restrictions, rate limits.</p>
+</div>
+
+<div class="step">
+  <div class="step-head"><div class="step-num">Step 2</div><div class="step-name">Navigate through it</div></div>
+  <p>Walk the booking funnel: vehicle identification (VIN or year/make/model + license/mileage), customer info entry, service selection page, calendar page, confirmation page.</p>
+  <p class="why">Captures the page graph and form structure so the bot can resume mid‑flow if interrupted.</p>
+</div>
+
+<div class="step">
+  <div class="step-head"><div class="step-num">Step 3</div><div class="step-name">Fetch open slots</div></div>
+  <p>Read the dealer's available appointment times for a target date range and return them as a structured list (date, time, advisor if shown, capacity if exposed).</p>
+  <p class="why">This is the input Kate uses when she asks the customer "Tuesday at 8:30 or Wednesday at 1?" — it must reflect real dealer inventory, not stale or fabricated data.</p>
+</div>
+
+<div class="step">
+  <div class="step-head"><div class="step-num">Step 4</div><div class="step-name">Select the service</div></div>
+  <p>Map our internal service codes (recall ID, DTC code, standard maintenance interval) onto the dealer's own service catalog as displayed on the page.</p>
+  <p class="why">Dealers describe services differently ("60K major service" vs "60,000 mile interval" vs "Service B"). The mapping table is part of the deliverable.</p>
+</div>
+
+<div class="step">
+  <div class="step-head"><div class="step-num">Step 5</div><div class="step-name">Book the service</div></div>
+  <p>Submit the booking. Capture the dealer's confirmation number, time, advisor, and any email/SMS the dealer sends to the customer. Verify the appointment shows up on the dealer side.</p>
+  <p class="why">This is the "moment of truth" — the only step that materially changes dealer state. We need it logged, idempotent, and reversible (cancel flow as a follow‑up).</p>
+</div>
+
+<h3>Out of scope (this work package)</h3>
+<ul>
+  <li>Multi‑dealer abstraction — Fox Taylor only.</li>
+  <li>Cancel / reschedule flows — those become Work Package 02 once Book is proven.</li>
+  <li>Production hardening (proxies, captcha service, retry queues) — POC runs from one machine.</li>
+  <li>Direct API integration — only revisited if the dealer offers one.</li>
+</ul>
+
+<h2>2. Approach</h2>
+
+<h3>Tooling</h3>
+<ul>
+  <li><strong>Playwright</strong> (Python) for headless‑Chromium driving — handles JavaScript‑heavy SPAs, modern dealer schedulers (Xtime, etc.) won't work with plain HTTP requests.</li>
+  <li><strong>Page object model</strong> — one Python class per page (<code>VehicleEntryPage</code>, <code>ServicePickerPage</code>, <code>CalendarPage</code>, <code>ConfirmPage</code>). Selectors centralized so a dealer site change is one file to fix.</li>
+  <li><strong>Recording + replay</strong> — Playwright's trace viewer captures every action with screenshots; this <em>is</em> the audit trail when something breaks.</li>
+  <li><strong>Test data</strong> — a small set of real customer + vehicle records supplied by Fox Taylor (with their consent) so we book real appointments we will then cancel by phone.</li>
+</ul>
+
+<h3>Phases</h3>
+<ol>
+  <li><strong>Reconnaissance (1–2 days)</strong> — manually walk the Fox Taylor scheduler, identify the underlying platform, capture network traffic, document every form, every required field, every async call.</li>
+  <li><strong>Read‑only build (3–4 days)</strong> — automate Steps 1–3. At this point we can fetch real open slots without changing any dealer state. Safe to run repeatedly.</li>
+  <li><strong>Write build (3–4 days)</strong> — automate Steps 4–5. First booking is reviewed live by an operator before submit. Subsequent bookings progressively unattended.</li>
+  <li><strong>Repeatability run (1 day)</strong> — five back‑to‑back bookings with different vehicles, different services, different time windows. All canceled by phone after.</li>
+</ol>
+
+<h2>3. Deliverable A — Proof of Concept Report</h2>
+
+<div class="deliverable proof">
+  <h3>What's in the report</h3>
+  <p>A single document covering the Fox Taylor scheduling system, with enough evidence that any engineer can verify the POC ran as described.</p>
+  <ul>
+    <li><strong>Platform identification</strong> — what software powers Fox Taylor's scheduler, its public API surface (if any), and which selectors / endpoints we depend on.</li>
+    <li><strong>Booking funnel map</strong> — annotated screenshots of every page in order, with the data we read from each and the data we wrote to each.</li>
+    <li><strong>Service catalog mapping</strong> — table mapping our internal triggers (recall IDs, DTCs, interval codes) to Fox Taylor's displayed service names.</li>
+    <li><strong>One full booking transcript</strong> — Playwright trace + screenshots + timing for one successful appointment, with the dealer's confirmation number visible.</li>
+    <li><strong>Failure modes observed</strong> — every error, popup, captcha, timeout, or unexpected redirect we hit, with how we handled it.</li>
+    <li><strong>Performance numbers</strong> — wall‑clock time per step, total time per booking, dealer page load times.</li>
+  </ul>
+
+  <div class="accept">
+    <h4>Acceptance criteria</h4>
+    <ul>
+      <li>One real Fox Taylor service appointment booked by the bot, confirmed by the dealer's own system, witnessed by the Fox Taylor service manager.</li>
+      <li>Report delivered as a self‑contained HTML/PDF that a non‑technical reader can follow.</li>
+      <li>All credentials, tokens, and customer data redacted.</li>
+    </ul>
+  </div>
+</div>
+
+<h2>4. Deliverable B — Repeatability Demonstration</h2>
+
+<div class="deliverable repeat">
+  <h3>What we demonstrate</h3>
+  <p>Booking once is a stunt. Booking the same way <em>five times in a row</em> with different inputs is a system. The repeatability run proves the automation is deterministic, not lucky.</p>
+  <ul>
+    <li><strong>Five bookings, back to back</strong>, varied across:
+      <ul>
+        <li>Two service types (e.g., "recall remediation" + "30K maintenance")</li>
+        <li>Three different days/times in the dealer's calendar</li>
+        <li>Three different vehicles (different VINs/year/make/model)</li>
+      </ul>
+    </li>
+    <li><strong>Per‑booking record</strong> — Playwright trace, dealer confirmation number, elapsed seconds, screenshots of the dealer's customer‑facing confirmation email.</li>
+    <li><strong>Live re‑run</strong> — one booking executed end‑to‑end on a screen share with the Fox Taylor team watching.</li>
+    <li><strong>Cancellation log</strong> — proof that all five test appointments were cleaned up (called and canceled by an operator), so we don't pollute the dealer's day.</li>
+  </ul>
+
+  <div class="accept">
+    <h4>Acceptance criteria</h4>
+    <ul>
+      <li>5 of 5 bookings succeed without manual intervention.</li>
+      <li>Median booking time under 60 seconds.</li>
+      <li>Zero double‑bookings, zero orphaned partial submissions.</li>
+      <li>Live demo run completes successfully on first attempt.</li>
+    </ul>
+  </div>
+</div>
+
+<h2>5. Risks &amp; mitigations</h2>
+
+<div class="risk-grid">
+  <div class="risk">
+    <h4>Captcha or bot detection</h4>
+    <p>Some dealer schedulers run reCAPTCHA or Cloudflare Turnstile. Mitigation: identify in reconnaissance; if blocking, route through a captcha‑solver service or request Fox Taylor whitelist our IP.</p>
+  </div>
+  <div class="risk">
+    <h4>Site changes break selectors</h4>
+    <p>Dealer sites get rebranded. Mitigation: page‑object pattern centralizes selectors; nightly canary run flags breakage within 24h.</p>
+  </div>
+  <div class="risk">
+    <h4>Terms‑of‑service / legal</h4>
+    <p>Some dealer ToS prohibit automated access. Mitigation: get written consent from Fox Taylor for the POC. For production, negotiate a partnership or formal API.</p>
+  </div>
+  <div class="risk">
+    <h4>Real bookings affect real customers</h4>
+    <p>Mitigation: every test booking is on a Guidepoint‑owned phone/email. Operator cancels each by phone within the same business day.</p>
+  </div>
+  <div class="risk">
+    <h4>Slot inventory race conditions</h4>
+    <p>The slot we read may be taken before we book. Mitigation: re‑verify availability inside the submit transaction; if lost, fall back to next slot and notify Kate to renegotiate with the customer.</p>
+  </div>
+  <div class="risk">
+    <h4>Rate limits / IP blocks</h4>
+    <p>Mitigation: throttle to one session at a time during POC; coordinate with dealer IT if blocked.</p>
+  </div>
+</div>
+
+<h2>6. Effort &amp; schedule</h2>
+<table>
+  <thead>
+    <tr><th>Week</th><th>Work</th><th>Output</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>W1 days 1–2</td><td>Reconnaissance of Fox Taylor scheduler</td><td>Platform identification + funnel map</td></tr>
+    <tr><td>W1 days 3–5</td><td>Read‑only automation (Steps 1–3)</td><td>Open‑slots fetcher (safe to run)</td></tr>
+    <tr><td>W2 days 1–4</td><td>Write automation (Steps 4–5) with operator review on first booking</td><td>End‑to‑end booking pipeline</td></tr>
+    <tr><td>W2 day 5</td><td>Repeatability run + report writeup</td><td>POC report + repeatability evidence</td></tr>
+  </tbody>
+</table>
+
+<h2>7. Coordination required from Fox Taylor</h2>
+<ul>
+  <li>Written consent for automated access to their public scheduler for POC purposes.</li>
+  <li>Five test customer/vehicle records (or permission to use Guidepoint‑created test customers).</li>
+  <li>Service manager available for ~30 minutes on the day of the live demo run.</li>
+  <li>A point of contact in their dealer IT in case our traffic looks suspicious.</li>
+</ul>
+
+<h2>8. What this enables next</h2>
+<ul>
+  <li><strong>Work Package 02:</strong> reschedule + cancel flows against Fox Taylor.</li>
+  <li><strong>Work Package 03:</strong> generalize to a second dealer on the same scheduling platform — measure the marginal effort (the real test of repeatability).</li>
+  <li><strong>Work Package 04:</strong> abstraction layer — one common interface, multiple dealer adapters underneath.</li>
+  <li><strong>Production:</strong> queue + worker model, retries, monitoring, captcha service, observability — wraps the per‑dealer automations into a reliable booking service Kate can call.</li>
+</ul>
+
+<footer>
+  Companion to <em>Service Booking — How It Works</em> (lifecycle) and <em>Rollout Plan</em>. The booking automation
+  proven here is what makes Phase 5 (concurrency) and Phase 7 (pilot go‑live) of the rollout plan real.
+</footer>
+
+</main>
+</body>
+</html>

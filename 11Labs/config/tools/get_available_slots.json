@@ -1,0 +1,16 @@
+{
+  "tool_id": "tool_2401kr6er1y1emyan21dana4b6d1",
+  "name": "get_available_slots",
+  "description": "fetch available appointment times for a service event",
+  "method": "GET",
+  "url": "https://example.com/get_available_slots",
+  "parameters": [],
+  "mocks": [
+    {
+      "name": "mock_1",
+      "status_code": 200,
+      "body": "{\n  \"slots\": [\n    \"Monday, May 11, 2026 - 8:00 AM\",\n    \"Monday, May 11, 2026 - 9:30 AM\",\n    \"Monday, May 11, 2026 - 11:00 AM\",\n    \"Monday, May 11, 2026 - 2:00 PM\",\n    \"Tuesday, May 12, 2026 - 8:30 AM\",\n    \"Tuesday, May 12, 2026 - 10:00 AM\",\n    \"Tuesday, May 12, 2026 - 1:30 PM\",\n    \"Wednesday, May 13, 2026 - 9:00 AM\",\n    \"Wednesday, May 13, 2026 - 11:30 AM\",\n    \"Wednesday, May 13, 2026 - 3:00 PM\"\n  ]\n}",
+      "condition": ""
+    }
+  ]
+}
