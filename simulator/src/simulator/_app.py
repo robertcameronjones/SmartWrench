@@ -52,6 +52,7 @@ from sms_adapter import (
     handle_inbound,
 )
 
+from simulator._basic_auth import BasicAuthMiddleware
 from simulator._connection import ConnectionProbe, build_env_connection_probe
 from simulator._ephemeral_triggers import EphemeralTriggerSource
 from simulator._routes import (
@@ -143,6 +144,10 @@ def build_app(
         docs_url="/docs",
         redoc_url=None,
     )
+    # Browser-facing HTTP Basic Auth. No-ops unless BASIC_AUTH_USER +
+    # BASIC_AUTH_PASS are both set. Exempts /sms and /twilio/* so Twilio
+    # webhooks still work without credentials.
+    app.add_middleware(BasicAuthMiddleware)
     app.include_router(build_router(deps=deps))
     app.mount(
         "/static",

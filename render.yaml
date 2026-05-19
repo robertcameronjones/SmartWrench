@@ -45,6 +45,15 @@ services:
       - key: PUBLIC_BASE_URL
         sync: false
 
+      # --- HTTP Basic Auth gate ---
+      # Set BOTH to enable the browser login prompt. Leave either unset
+      # to disable auth (e.g. local dev). Does not protect /sms or
+      # /twilio/* (Twilio doesn't send Basic Auth headers).
+      - key: BASIC_AUTH_USER
+        sync: false
+      - key: BASIC_AUTH_PASS
+        sync: false
+
       # --- Twilio (set in dashboard) ---
       - key: TWILIO_ACCOUNT_SID
         sync: false
