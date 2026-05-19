@@ -12,6 +12,21 @@ The trigger source is the in-memory ``EphemeralTriggerSource`` — the
 operator composes a trigger by typing service type + summary in the
 UI, the fire route synthesizes the Trigger from saved master data,
 hands it to ``CaseManager``, and discards it after.
+
+Per-user data namespacing (v2)
+==============================
+User-scoped state (master data, slots, per-user CaseManager) is no
+longer constructed at app startup. A :class:`UserContextRegistry`
+lives on ``app.state.user_contexts`` and lazily builds + caches a
+per-user :class:`UserContext` on first request, seeding the user's
+directory from ``fixtures/`` if missing.
+
+Each user's :class:`CaseManager` is wired with that user's
+``master_data`` but reuses the **global** ``case_repo``,
+``trigger_source``, and ``call_session``. That way customer / dealer
+/ vehicle lookups during ``fire()`` hit the user's namespace, while
+case files land in the shared ``cases/`` dir where the live
+ElevenLabs ``CallSession`` callback can find them.
 """
 
 from __future__ import annotations
@@ -27,23 +42,16 @@ from fastapi.templating import Jinja2Templates
 
 from guidepoint.case import (
     CaseEvent,
-    CaseManager,
     CaseRepository,
     JsonCasePaths,
     RetryPolicy,
     TriggerSource,
-    build_default_case_manager,
     build_json_case_repository,
     build_live_call_session,
 )
 from guidepoint.case._call_session import CallSession
 from guidepoint.clock import Clock, build_system_clock
 from guidepoint.events import EventBus, build_event_bus
-from guidepoint.master_data import (
-    JsonFilePaths,
-    MasterDataRepository,
-    build_json_master_data_repository,
-)
 from sms.server import app as sms_webhook_app
 from sms.server import inbound_sms, register_inbound_handler
 from sms_adapter import (
@@ -61,9 +69,9 @@ from simulator._routes import (
     package_static_dir,
     package_templates_dir,
 )
-from simulator._slots import SlotsRepository, build_slots_repository
 from simulator._sms_context_registry import SmsContextRegistry
 from simulator._sms_setup import build_sms_deps
+from simulator._users import UserContextRegistry, UserRegistry
 
 _log = structlog.get_logger(__name__)
 
@@ -73,49 +81,38 @@ def build_app(
     project_root: Path,
     clock: Clock | None = None,
     bus: EventBus[CaseEvent] | None = None,
-    master_data: MasterDataRepository | None = None,
     case_repo: CaseRepository | None = None,
     trigger_source: TriggerSource | None = None,
-    case_manager: CaseManager | None = None,
     call_session: CallSession | None = None,
     probe: ConnectionProbe | None = None,
-    slots_repo: SlotsRepository | None = None,
     retry_policy: RetryPolicy | None = None,
     sms_deps: SmsDeps | None = None,
     sms_contexts: SmsContextRegistry | None = None,
+    user_registry: UserRegistry | None = None,
 ) -> FastAPI:
     """Compose the simulator application.
 
-    Each dependency has a default constructed from JSON-fixture paths
-    under ``project_root``; tests pass fakes for any that need to be
-    deterministic. The default ``call_session`` is the live ElevenLabs
-    adapter — there is no stub. Tests that don't want to place real
-    calls inject a fake via the ``call_session`` parameter.
+    Most dependencies have defaults constructed from env / disk;
+    tests pass fakes for any that need to be deterministic. The
+    default ``call_session`` is the live ElevenLabs adapter — there
+    is no stub. Tests that don't want to place real calls inject a
+    fake via the ``call_session`` parameter.
+
+    ``user_registry`` defaults to one parsed from the ``USERS`` env
+    var; tests can pass a fixed allowlist.
     """
     resolved_clock = clock or build_system_clock()
     resolved_bus: EventBus[CaseEvent] = bus or build_event_bus(payload_type=CaseEvent)
-    resolved_master_data = master_data or build_json_master_data_repository(
-        paths=JsonFilePaths.for_root(project_root),
-    )
+    resolved_probe = probe or build_env_connection_probe(clock=resolved_clock)
+    resolved_user_registry = user_registry or UserRegistry(os.environ.get("USERS") or "")
     resolved_case_repo = case_repo or build_json_case_repository(
         paths=JsonCasePaths.for_root(project_root),
     )
-    resolved_slots_repo = slots_repo or build_slots_repository(project_root=project_root)
     resolved_trigger_source: TriggerSource = trigger_source or EphemeralTriggerSource()
-    resolved_probe = probe or build_env_connection_probe(clock=resolved_clock)
     resolved_call_session = call_session or _build_live_call_session_from_env(
         case_repo=resolved_case_repo,
         bus=resolved_bus,
         clock=resolved_clock,
-    )
-    resolved_case_manager = case_manager or build_default_case_manager(
-        master_data=resolved_master_data,
-        case_repo=resolved_case_repo,
-        trigger_source=resolved_trigger_source,
-        call_session=resolved_call_session,
-        bus=resolved_bus,
-        clock=resolved_clock,
-        retry_policy=retry_policy,
     )
 
     # SMS dispatch is optional. When env vars are missing, the factory
@@ -125,11 +122,8 @@ def build_app(
 
     templates = Jinja2Templates(directory=str(package_templates_dir()))
     deps = RouteDeps(
-        master_data=resolved_master_data,
-        slots_repo=resolved_slots_repo,
         case_repo=resolved_case_repo,
         trigger_source=resolved_trigger_source,
-        case_manager=resolved_case_manager,
         bus=resolved_bus,
         probe=resolved_probe,
         clock=resolved_clock,
@@ -138,12 +132,29 @@ def build_app(
         sms_contexts=sms_contexts,
     )
 
+    user_contexts = UserContextRegistry(
+        project_root=project_root,
+        user_registry=resolved_user_registry,
+        case_repo=resolved_case_repo,
+        trigger_source=resolved_trigger_source,
+        call_session=resolved_call_session,
+        bus=resolved_bus,
+        clock=resolved_clock,
+        retry_policy=retry_policy,
+    )
+
     app = FastAPI(
         title="Guidepoint Simulator",
-        version="0.3.0",
+        version="0.4.0",
         docs_url="/docs",
         redoc_url=None,
     )
+    # Stash the per-user registry on app.state so the FastAPI dependency
+    # get_user_context can find it from any request. Allowed-users
+    # registry tags along for future UIs (user picker, etc.).
+    app.state.user_contexts = user_contexts
+    app.state.user_registry = resolved_user_registry
+
     # Browser-facing HTTP Basic Auth. No-ops unless BASIC_AUTH_USER +
     # BASIC_AUTH_PASS are both set. Exempts /sms and /twilio/* so Twilio
     # webhooks still work without credentials.
@@ -174,6 +185,11 @@ def build_app(
             "simulator.sms.handler.not_registered",
             reason="sms_deps not configured (missing env vars?)",
         )
+
+    _log.info(
+        "simulator.users.configured",
+        allowed=", ".join(resolved_user_registry.list_ids()),
+    )
 
     return app
 

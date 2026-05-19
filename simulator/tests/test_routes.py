@@ -21,9 +21,16 @@ from tests.case._helpers import FakeBookedCallSession
 from tests.simulator._helpers import (
     FixedClock,
     StubProbe,
+    UserClient,
     healthy_status,
     seed_master_data,
 )
+
+# All API routes are gated by per-user HTTP Basic Auth (v2 phase 1).
+# Tests use the default "demo:demo" user; UserClient sends the auth
+# header on each request.
+TEST_USER = "demo"
+TEST_PASSWORD = "demo"
 
 
 def _build_test_app(tmp_path: Path) -> FastAPI:
@@ -39,21 +46,29 @@ def _build_test_app(tmp_path: Path) -> FastAPI:
 
 
 @pytest.fixture
-def client(tmp_path: Path) -> TestClient:
-    return TestClient(_build_test_app(tmp_path))
+def client(tmp_path: Path) -> UserClient:
+    return UserClient(
+        TestClient(_build_test_app(tmp_path)),
+        user=TEST_USER,
+        password=TEST_PASSWORD,
+    )
 
 
 class TestIndex:
-    def test_renders_html_shell(self, client: TestClient) -> None:
+    def test_renders_html_shell_with_user_in_topbar(self, client: UserClient) -> None:
         res = client.get("/")
         assert res.status_code == 200
         assert "Guidepoint" in res.text
         assert 'id="trigger-form"' in res.text
         assert "trigger-picker" not in res.text
+        assert TEST_USER in res.text  # topbar pill renders the user id
+
+    def test_index_requires_auth(self, client: UserClient) -> None:
+        assert client.raw.get("/").status_code == 401
 
 
 class TestMasterDataSnapshot:
-    def test_returns_first_of_each_entity_plus_slots(self, client: TestClient) -> None:
+    def test_returns_first_of_each_entity_plus_slots(self, client: UserClient) -> None:
         body = client.get("/api/master-data").json()
         assert body["customer"]["id"] == "cust_test"
         assert body["dealer"]["id"] == "dealer_test"
@@ -62,40 +77,44 @@ class TestMasterDataSnapshot:
 
 
 class TestMasterDataApi:
-    def test_get_customer(self, client: TestClient) -> None:
+    def test_get_customer(self, client: UserClient) -> None:
         body = client.get("/api/customers/cust_test").json()
         assert body["first_name"] == "Test"
 
-    def test_get_dealer(self, client: TestClient) -> None:
+    def test_get_dealer(self, client: UserClient) -> None:
         body = client.get("/api/dealers/dealer_test").json()
         assert body["ride_radius_miles"] == 10
 
-    def test_get_vehicle(self, client: TestClient) -> None:
+    def test_get_vehicle(self, client: UserClient) -> None:
         body = client.get("/api/vehicles/1C4RJFBG5NC123456").json()
         assert body["make"] == "Jeep"
 
-    def test_put_customer_updates_disk(self, client: TestClient, tmp_path: Path) -> None:
+    def test_put_customer_updates_disk(self, client: UserClient, tmp_path: Path) -> None:
         body = client.get("/api/customers/cust_test").json()
         body["first_name"] = "Renamed"
         res = client.put("/api/customers/cust_test", json=body)
         assert res.status_code == 200
+        # Per-user namespace: PUT writes to the user's data dir, not the
+        # shared fixtures/ tree (which stays unchanged as the seed source).
         on_disk = json.loads(
-            (tmp_path / "fixtures" / "customers" / "cust_test.json").read_text("utf-8")
+            (
+                tmp_path / "data" / "users" / TEST_USER / "customers" / "cust_test.json"
+            ).read_text("utf-8")
         )
         assert on_disk["first_name"] == "Renamed"
 
-    def test_put_id_mismatch_400s(self, client: TestClient) -> None:
+    def test_put_id_mismatch_400s(self, client: UserClient) -> None:
         body = client.get("/api/customers/cust_test").json()
         res = client.put("/api/customers/other_id", json=body)
         assert res.status_code == 400
 
 
 class TestSlotsApi:
-    def test_get_returns_seeded_slots(self, client: TestClient) -> None:
+    def test_get_returns_seeded_slots(self, client: UserClient) -> None:
         body = client.get("/api/slots").json()
         assert {s["id"] for s in body} == {"slot_a", "slot_b"}
 
-    def test_put_overwrites_disk(self, client: TestClient, tmp_path: Path) -> None:
+    def test_put_overwrites_disk(self, client: UserClient, tmp_path: Path) -> None:
         new_slots = [
             {
                 "id": "slot_x",
@@ -105,18 +124,20 @@ class TestSlotsApi:
         ]
         res = client.put("/api/slots", json=new_slots)
         assert res.status_code == 200
-        on_disk = json.loads((tmp_path / "fixtures" / "slots.json").read_text("utf-8"))
+        on_disk = json.loads(
+            (tmp_path / "data" / "users" / TEST_USER / "slots.json").read_text("utf-8")
+        )
         assert [s["id"] for s in on_disk] == ["slot_x"]
 
 
 class TestConnection:
-    def test_returns_status(self, client: TestClient) -> None:
+    def test_returns_status(self, client: UserClient) -> None:
         body = client.get("/api/connection").json()
         assert body["healthy"] is True
 
 
 class TestFireEndpoint:
-    def test_synthesizes_trigger_and_returns_case_ids(self, client: TestClient) -> None:
+    def test_synthesizes_trigger_and_returns_case_ids(self, client: UserClient) -> None:
         res = client.post(
             "/api/fire",
             json={"service_type": "maintenance", "service_summary": "30k mile service"},
@@ -126,7 +147,7 @@ class TestFireEndpoint:
         assert body["case_id"]
         assert body["correlation_id"]
 
-    def test_fire_uses_saved_slots(self, client: TestClient) -> None:
+    def test_fire_uses_saved_slots(self, client: UserClient) -> None:
         client.post(
             "/api/fire",
             json={"service_type": "maintenance", "service_summary": "30k mile service"},
@@ -136,12 +157,11 @@ class TestFireEndpoint:
         full = client.get(f"/api/cases/{case_id}").json()
         assert {s["id"] for s in full["offered_slots"]} == {"slot_a", "slot_b"}
 
-    def test_invalid_payload_422s(self, client: TestClient) -> None:
-        # Missing service_summary.
+    def test_invalid_payload_422s(self, client: UserClient) -> None:
         res = client.post("/api/fire", json={"service_type": "maintenance"})
         assert res.status_code == 422
 
-    def test_unknown_service_type_422s(self, client: TestClient) -> None:
+    def test_unknown_service_type_422s(self, client: UserClient) -> None:
         res = client.post(
             "/api/fire",
             json={"service_type": "weird", "service_summary": "x"},
@@ -150,7 +170,7 @@ class TestFireEndpoint:
 
 
 class TestRecentCasesApi:
-    def test_lists_after_fire(self, client: TestClient) -> None:
+    def test_lists_after_fire(self, client: UserClient) -> None:
         client.post(
             "/api/fire",
             json={"service_type": "maintenance", "service_summary": "oil change"},
@@ -159,8 +179,28 @@ class TestRecentCasesApi:
         assert len(cases) == 1
         assert cases[0]["state"] in {"booked", "unreachable", "declined", "escalated"}
 
-    def test_get_missing_case_404s(self, client: TestClient) -> None:
+    def test_get_missing_case_404s(self, client: UserClient) -> None:
         assert client.get("/api/cases/nope").status_code == 404
+
+
+class TestAuth:
+    def test_no_credentials_401s(self, client: UserClient) -> None:
+        assert client.raw.get("/api/customers/cust_test").status_code == 401
+
+    def test_wrong_password_401s(self, client: UserClient) -> None:
+        res = client.raw.get(
+            "/api/customers/cust_test", auth=(TEST_USER, "wrong")
+        )
+        assert res.status_code == 401
+
+    def test_unknown_user_401s(self, client: UserClient) -> None:
+        res = client.raw.get(
+            "/api/customers/cust_test", auth=("nobody", "anypw")
+        )
+        assert res.status_code == 401
+
+    def test_health_exempt_from_auth(self, client: UserClient) -> None:
+        assert client.raw.get("/health").status_code == 200
 
 
 class TestWebSocket:
@@ -175,8 +215,9 @@ class TestWebSocket:
             probe=StubProbe(status=healthy_status(clock=clock)),
             call_session=FakeBookedCallSession(),
         )
-        client = TestClient(app)
-        with client.websocket_connect("/ws/log") as ws:
+        raw = TestClient(app)
+        client = UserClient(raw, user=TEST_USER, password=TEST_PASSWORD)
+        with raw.websocket_connect("/ws/log") as ws:
             res = client.post(
                 "/api/fire",
                 json={"service_type": "maintenance", "service_summary": "30k mile service"},

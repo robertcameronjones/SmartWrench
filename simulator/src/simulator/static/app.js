@@ -14,6 +14,11 @@
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 
+// Per-user identity comes from HTTP Basic Auth on the server side.
+// The browser sends Authorization headers automatically on every
+// fetch, so this JS never has to think about who the user is — it
+// just talks to /api/* and the server scopes by request.state.user_id.
+
 const state = {
   customer: null,
   dealer: null,

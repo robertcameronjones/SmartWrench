@@ -45,20 +45,21 @@ services:
       - key: PUBLIC_BASE_URL
         sync: false
 
-      # --- HTTP Basic Auth gate ---
-      # Set BOTH to enable the browser login prompt. Leave either unset
-      # to disable auth (e.g. local dev). Does not protect /sms or
-      # /twilio/* (Twilio doesn't send Basic Auth headers).
-      - key: BASIC_AUTH_USER
-        sync: false
-      - key: BASIC_AUTH_PASS
-        sync: false
-
       # --- Deployment label (UI pill in the topbar) ---
       # Shown as a small pill in the simulator UI so operators know
       # which deployment they're hitting (e.g. "v1", "v2", "dev").
       # Optional — UI just hides the pill when unset.
       - key: DEPLOYMENT_LABEL
+        sync: false
+
+      # --- Operators + passwords (REQUIRED in production) ---
+      # Comma-separated id:password pairs. Each operator gets a
+      # private data namespace at data/users/<id>/, seeded from
+      # fixtures/ on first authenticated request. HTTP Basic Auth is
+      # always required; the browser's username IS the operator id.
+      # Defaults to "demo:demo" if unset (dev only; logged loudly).
+      # Example: USERS=robert:hunter2,alice:s3cret,bob:p4ssword
+      - key: USERS
         sync: false
 
       # --- Twilio (set in dashboard) ---

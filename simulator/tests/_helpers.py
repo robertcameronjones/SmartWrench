@@ -6,7 +6,9 @@ import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import final
+from typing import Any, final
+
+from fastapi.testclient import TestClient
 
 from guidepoint.clock import Clock
 from simulator import ConnectionStatus
@@ -117,6 +119,37 @@ def healthy_status(*, clock: Clock) -> ConnectionStatus:
     )
 
 
+@final
+class UserClient:
+    """``TestClient`` wrapper that auto-injects HTTP Basic Auth headers.
+
+    Per-user Basic Auth gates every API call in v2: the username IS
+    the operator id. Tests configure the simulator with
+    ``UserRegistry("demo:demo")`` (the default) and this wrapper
+    sends ``Authorization: Basic ...`` on each request.
+
+    ``.raw`` exposes the underlying ``TestClient`` for tests that
+    need to exercise auth failure modes or hit exempt routes
+    (``/health``, ``/sms``, ``/twilio/*``).
+    """
+
+    def __init__(self, client: TestClient, *, user: str, password: str) -> None:
+        self.raw = client
+        self.auth = (user, password)
+
+    def get(self, url: str, **kw: Any) -> Any:
+        return self.raw.get(url, auth=kw.pop("auth", self.auth), **kw)
+
+    def post(self, url: str, **kw: Any) -> Any:
+        return self.raw.post(url, auth=kw.pop("auth", self.auth), **kw)
+
+    def put(self, url: str, **kw: Any) -> Any:
+        return self.raw.put(url, auth=kw.pop("auth", self.auth), **kw)
+
+    def delete(self, url: str, **kw: Any) -> Any:
+        return self.raw.delete(url, auth=kw.pop("auth", self.auth), **kw)
+
+
 __all__ = [
     "SAMPLE_CUSTOMER",
     "SAMPLE_DEALER",
@@ -124,6 +157,7 @@ __all__ = [
     "SAMPLE_VEHICLE",
     "FixedClock",
     "StubProbe",
+    "UserClient",
     "healthy_status",
     "seed_master_data",
     "seed_slots",

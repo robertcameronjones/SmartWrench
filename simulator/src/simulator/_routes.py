@@ -4,6 +4,18 @@ Pure I/O glue: parse the request, call into the injected services,
 return a model. No business logic lives here — if a handler grows past
 trivial, it belongs in a service module.
 
+Per-user state
+==============
+User-scoped data (customers, dealers, vehicles, slots) is injected
+per-request via :func:`simulator._users.get_user_context`, which
+reads the validated user id off ``request.state.user_id`` (set by
+:class:`BasicAuthMiddleware`) and returns a cached
+:class:`UserContext` for that user.
+
+Truly global state (event bus, connection probe, system clock, the
+shared SMS adapter, templates) is held in :class:`RouteDeps`, captured
+once at app build time.
+
 Per the operator's mental model (2026-05-10):
 
 - The simulator is a **read/write UI over the master data**: customer,
@@ -27,7 +39,7 @@ from pathlib import Path
 from typing import Any, final
 
 import structlog
-from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
@@ -36,7 +48,6 @@ from guidepoint.case import (
     CaseError,
     CaseEvent,
     CaseId,
-    CaseManager,
     CaseRepository,
     OfferedSlot,
     ServiceEvent,
@@ -54,7 +65,6 @@ from guidepoint.master_data import (
     DealerNotFoundError,
     DealerRecord,
     MasterDataError,
-    MasterDataRepository,
     VehicleNotFoundError,
     VehicleRecord,
     VehicleVin,
@@ -69,8 +79,8 @@ from simulator._models import (
     FireResponse,
     MasterDataSnapshot,
 )
-from simulator._slots import SlotsRepository
 from simulator._sms_context_registry import SmsContextRegistry
+from simulator._users import UserContext, get_user_context
 
 _log = structlog.get_logger(__name__)
 
@@ -78,13 +88,17 @@ _log = structlog.get_logger(__name__)
 @final
 @dataclass(frozen=True, slots=True)
 class RouteDeps:
-    """Injected dependencies for the route layer."""
+    """Global dependencies for the route layer.
 
-    master_data: MasterDataRepository
-    slots_repo: SlotsRepository
+    Per-user master data + slots are pulled per-request via
+    ``Depends(get_user_context)``. Cases stay global for now (Commit
+    1) so the live ``CallSession`` keeps writing to a single
+    ``case_repo``; per-user case filtering will land in the next
+    commit via an ownership manifest.
+    """
+
     case_repo: CaseRepository
     trigger_source: TriggerSource
-    case_manager: CaseManager
     bus: EventBus[CaseEvent]
     probe: ConnectionProbe
     clock: Clock
@@ -100,44 +114,42 @@ def build_router(*, deps: RouteDeps) -> APIRouter:
     """Construct the FastAPI router with handlers bound to ``deps``."""
     router = APIRouter()
     router.add_api_route("/", _index(deps), response_class=HTMLResponse)
-    router.add_api_route("/health", _health(), methods=["GET", "HEAD"])
+    router.add_api_route("/health", _health, methods=["GET", "HEAD"])
 
     router.add_api_route(
         "/api/master-data",
-        _master_data_snapshot(deps),
+        _master_data_snapshot,
         response_model=MasterDataSnapshot,
     )
 
-    router.add_api_route(
-        "/api/customers/{customer_id}", _get_customer(deps), response_model=CustomerRecord
-    )
+    router.add_api_route("/api/customers/{customer_id}", _get_customer, response_model=CustomerRecord)
     router.add_api_route(
         "/api/customers/{customer_id}",
-        _put_customer(deps),
+        _put_customer,
         methods=["PUT"],
         response_model=CustomerRecord,
     )
 
-    router.add_api_route("/api/dealers/{dealer_id}", _get_dealer(deps), response_model=DealerRecord)
+    router.add_api_route("/api/dealers/{dealer_id}", _get_dealer, response_model=DealerRecord)
     router.add_api_route(
         "/api/dealers/{dealer_id}",
-        _put_dealer(deps),
+        _put_dealer,
         methods=["PUT"],
         response_model=DealerRecord,
     )
 
-    router.add_api_route("/api/vehicles/{vin}", _get_vehicle(deps), response_model=VehicleRecord)
+    router.add_api_route("/api/vehicles/{vin}", _get_vehicle, response_model=VehicleRecord)
     router.add_api_route(
         "/api/vehicles/{vin}",
-        _put_vehicle(deps),
+        _put_vehicle,
         methods=["PUT"],
         response_model=VehicleRecord,
     )
 
-    router.add_api_route("/api/slots", _get_slots(deps), response_model=list[OfferedSlot])
+    router.add_api_route("/api/slots", _get_slots, response_model=list[OfferedSlot])
     router.add_api_route(
         "/api/slots",
-        _put_slots(deps),
+        _put_slots,
         methods=["PUT"],
         response_model=list[OfferedSlot],
     )
@@ -156,152 +168,151 @@ def build_router(*, deps: RouteDeps) -> APIRouter:
 # --------------------------------------------------------------------------- #
 
 
-def _health() -> Callable[[], dict[str, str]]:
+def _health() -> dict[str, str]:
     """Liveness endpoint for Render's healthcheck. Always returns 200.
 
     Exempt from BasicAuthMiddleware (see _EXEMPT_PREFIXES) so Render's
     healthcheck can succeed without credentials.
     """
-
-    def handler() -> dict[str, str]:
-        return {"status": "ok"}
-
-    return handler
+    return {"status": "ok"}
 
 
 def _index(deps: RouteDeps) -> Callable[[Request], Coroutine[Any, Any, HTMLResponse]]:
     async def handler(request: Request) -> HTMLResponse:
+        # Middleware has already validated Basic Auth by the time we
+        # get here, so request.state.user_id is always set.
         return deps.templates.TemplateResponse(
             request=request,
             name="index.html",
             context={
                 "deployment_label": os.environ.get("DEPLOYMENT_LABEL", "").strip(),
+                "user_id": getattr(request.state, "user_id", ""),
             },
         )
 
     return handler
 
 
-def _master_data_snapshot(deps: RouteDeps) -> Callable[[], MasterDataSnapshot]:
+def _master_data_snapshot(
+    ctx: UserContext = Depends(get_user_context),
+) -> MasterDataSnapshot:
     """One-shot loader for the page boot.
 
     Picks the first record of each entity by sort order. The simulator
     today operates on one of each; the snapshot endpoint is the single
     place that "primary record" assumption lives.
     """
-
-    def handler() -> MasterDataSnapshot:
-        try:
-            customer = _first_or_404(
-                deps.master_data.list_customers(),
-                detail="no customer fixtures found under fixtures/customers/",
-            )
-            dealer = _first_or_404(
-                deps.master_data.list_dealers(),
-                detail="no dealer fixtures found under fixtures/dealers/",
-            )
-            vehicle = _first_or_404(
-                deps.master_data.list_vehicles(),
-                detail="no vehicle fixtures found under fixtures/vehicles/",
-            )
-        except MasterDataError as exc:
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
-        return MasterDataSnapshot(
-            customer=customer,
-            dealer=dealer,
-            vehicle=vehicle,
-            slots=deps.slots_repo.list(),
+    try:
+        customer = _first_or_404(
+            ctx.master_data.list_customers(),
+            detail=f"no customer fixtures for user {ctx.user.id!r}",
         )
-
-    return handler
-
-
-def _get_customer(deps: RouteDeps) -> Callable[[str], CustomerRecord]:
-    def handler(customer_id: str) -> CustomerRecord:
-        try:
-            return deps.master_data.get_customer(CustomerId(customer_id))
-        except MasterDataError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-    return handler
-
-
-def _put_customer(deps: RouteDeps) -> Callable[[str, CustomerRecord], CustomerRecord]:
-    def handler(customer_id: str, record: CustomerRecord) -> CustomerRecord:
-        if record.id != customer_id:
-            raise HTTPException(
-                status_code=400,
-                detail=f"customer id mismatch: url={customer_id!r} body={record.id!r}",
-            )
-        deps.master_data.save_customer(record)
-        _log.info("simulator.customer.saved", customer_id=customer_id)
-        return record
-
-    return handler
+        dealer = _first_or_404(
+            ctx.master_data.list_dealers(),
+            detail=f"no dealer fixtures for user {ctx.user.id!r}",
+        )
+        vehicle = _first_or_404(
+            ctx.master_data.list_vehicles(),
+            detail=f"no vehicle fixtures for user {ctx.user.id!r}",
+        )
+    except MasterDataError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return MasterDataSnapshot(
+        customer=customer,
+        dealer=dealer,
+        vehicle=vehicle,
+        slots=ctx.slots_repo.list(),
+    )
 
 
-def _get_dealer(deps: RouteDeps) -> Callable[[str], DealerRecord]:
-    def handler(dealer_id: str) -> DealerRecord:
-        try:
-            return deps.master_data.get_dealer(DealerId(dealer_id))
-        except MasterDataError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-    return handler
-
-
-def _put_dealer(deps: RouteDeps) -> Callable[[str, DealerRecord], DealerRecord]:
-    def handler(dealer_id: str, record: DealerRecord) -> DealerRecord:
-        if record.id != dealer_id:
-            raise HTTPException(
-                status_code=400,
-                detail=f"dealer id mismatch: url={dealer_id!r} body={record.id!r}",
-            )
-        deps.master_data.save_dealer(record)
-        _log.info("simulator.dealer.saved", dealer_id=dealer_id)
-        return record
-
-    return handler
+def _get_customer(
+    customer_id: str,
+    ctx: UserContext = Depends(get_user_context),
+) -> CustomerRecord:
+    try:
+        return ctx.master_data.get_customer(CustomerId(customer_id))
+    except MasterDataError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-def _get_vehicle(deps: RouteDeps) -> Callable[[str], VehicleRecord]:
-    def handler(vin: str) -> VehicleRecord:
-        try:
-            return deps.master_data.get_vehicle(VehicleVin(vin))
-        except MasterDataError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-    return handler
-
-
-def _put_vehicle(deps: RouteDeps) -> Callable[[str, VehicleRecord], VehicleRecord]:
-    def handler(vin: str, record: VehicleRecord) -> VehicleRecord:
-        if record.vin != vin:
-            raise HTTPException(
-                status_code=400,
-                detail=f"vin mismatch: url={vin!r} body={record.vin!r}",
-            )
-        deps.master_data.save_vehicle(record)
-        _log.info("simulator.vehicle.saved", vin=vin)
-        return record
-
-    return handler
+def _put_customer(
+    customer_id: str,
+    record: CustomerRecord,
+    ctx: UserContext = Depends(get_user_context),
+) -> CustomerRecord:
+    if record.id != customer_id:
+        raise HTTPException(
+            status_code=400,
+            detail=f"customer id mismatch: url={customer_id!r} body={record.id!r}",
+        )
+    ctx.master_data.save_customer(record)
+    _log.info("simulator.customer.saved", user_id=ctx.user.id, customer_id=customer_id)
+    return record
 
 
-def _get_slots(deps: RouteDeps) -> Callable[[], list[OfferedSlot]]:
-    def handler() -> list[OfferedSlot]:
-        return list(deps.slots_repo.list())
+def _get_dealer(
+    dealer_id: str,
+    ctx: UserContext = Depends(get_user_context),
+) -> DealerRecord:
+    try:
+        return ctx.master_data.get_dealer(DealerId(dealer_id))
+    except MasterDataError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    return handler
+
+def _put_dealer(
+    dealer_id: str,
+    record: DealerRecord,
+    ctx: UserContext = Depends(get_user_context),
+) -> DealerRecord:
+    if record.id != dealer_id:
+        raise HTTPException(
+            status_code=400,
+            detail=f"dealer id mismatch: url={dealer_id!r} body={record.id!r}",
+        )
+    ctx.master_data.save_dealer(record)
+    _log.info("simulator.dealer.saved", user_id=ctx.user.id, dealer_id=dealer_id)
+    return record
 
 
-def _put_slots(deps: RouteDeps) -> Callable[[list[OfferedSlot]], list[OfferedSlot]]:
-    def handler(slots: list[OfferedSlot]) -> list[OfferedSlot]:
-        saved = deps.slots_repo.save(slots)
-        _log.info("simulator.slots.saved", count=len(saved))
-        return list(saved)
+def _get_vehicle(
+    vin: str,
+    ctx: UserContext = Depends(get_user_context),
+) -> VehicleRecord:
+    try:
+        return ctx.master_data.get_vehicle(VehicleVin(vin))
+    except MasterDataError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    return handler
+
+def _put_vehicle(
+    vin: str,
+    record: VehicleRecord,
+    ctx: UserContext = Depends(get_user_context),
+) -> VehicleRecord:
+    if record.vin != vin:
+        raise HTTPException(
+            status_code=400,
+            detail=f"vin mismatch: url={vin!r} body={record.vin!r}",
+        )
+    ctx.master_data.save_vehicle(record)
+    _log.info("simulator.vehicle.saved", user_id=ctx.user.id, vin=vin)
+    return record
+
+
+def _get_slots(
+    ctx: UserContext = Depends(get_user_context),
+) -> list[OfferedSlot]:
+    return list(ctx.slots_repo.list())
+
+
+def _put_slots(
+    slots: list[OfferedSlot],
+    ctx: UserContext = Depends(get_user_context),
+) -> list[OfferedSlot]:
+    saved = ctx.slots_repo.save(slots)
+    _log.info("simulator.slots.saved", user_id=ctx.user.id, count=len(saved))
+    return list(saved)
 
 
 def _list_recent_cases(deps: RouteDeps) -> Callable[[], list[CaseSummary]]:
@@ -338,29 +349,33 @@ def _connection(deps: RouteDeps) -> Callable[[], ConnectionStatus]:
     return handler
 
 
-def _fire(deps: RouteDeps) -> Callable[[FireRequest], Coroutine[Any, Any, FireResponse]]:
+def _fire(
+    deps: RouteDeps,
+) -> Callable[..., Coroutine[Any, Any, FireResponse]]:
     """Synthesize a trigger from saved master data + the form, then fire.
 
     The browser sends only ``service_type`` + ``service_summary`` (+
     optional ``narrative``). Everything else — which customer, which
-    vehicle, which dealer, which slots — comes from the saved fixtures.
-    The Trigger object exists for the duration of this call and is
-    held in memory by the ephemeral trigger source.
+    vehicle, which dealer, which slots — comes from the saved fixtures
+    in the operator's user namespace.
     """
 
-    async def handler(request: FireRequest) -> FireResponse:
+    async def handler(
+        request: FireRequest,
+        ctx: UserContext = Depends(get_user_context),
+    ) -> FireResponse:
         try:
             customer = _first_or_404(
-                deps.master_data.list_customers(),
-                detail="no customer fixtures available to fire against",
+                ctx.master_data.list_customers(),
+                detail=f"no customer fixtures for user {ctx.user.id!r}",
             )
             dealer = _first_or_404(
-                deps.master_data.list_dealers(),
-                detail="no dealer fixtures available to fire against",
+                ctx.master_data.list_dealers(),
+                detail=f"no dealer fixtures for user {ctx.user.id!r}",
             )
             vehicle = _first_or_404(
-                deps.master_data.list_vehicles(),
-                detail="no vehicle fixtures available to fire against",
+                ctx.master_data.list_vehicles(),
+                detail=f"no vehicle fixtures for user {ctx.user.id!r}",
             )
         except (CustomerNotFoundError, DealerNotFoundError, VehicleNotFoundError) as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -368,6 +383,7 @@ def _fire(deps: RouteDeps) -> Callable[[FireRequest], Coroutine[Any, Any, FireRe
         if request.channel == "sms":
             return await _fire_sms(
                 deps=deps,
+                ctx=ctx,
                 customer=customer,
                 dealer=dealer,
                 vehicle=vehicle,
@@ -384,25 +400,26 @@ def _fire(deps: RouteDeps) -> Callable[[FireRequest], Coroutine[Any, Any, FireRe
                 narrative=request.narrative,
             ),
             channel_preference="voice",
-            offered_slots=deps.slots_repo.list(),
+            offered_slots=ctx.slots_repo.list(),
             source="operator",
             status="pending",
             created_at=deps.clock.now(),
         )
         # Register the synthesized trigger so CaseManager.mark_fired/_failed
         # have something to update. The ephemeral source no-ops if it isn't
-        # registered.
+        # registered. The trigger_source is global (single in-memory dict)
+        # but each user's CaseManager carries its own master_data so
+        # customer/vehicle/dealer lookups hit the right namespace.
         deps.trigger_source.save(trigger)
 
         try:
-            case = await deps.case_manager.fire(trigger)
+            case = await ctx.case_manager.fire(trigger)
         except (CaseError, MasterDataError) as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
-        # Customer is unused here but resolved above so a bad-fixture
-        # 409 surfaces before we synthesize a trigger.
         _log.info(
             "simulator.fire.accepted",
+            user_id=ctx.user.id,
             trigger_id=trigger.id,
             case_id=case.case_id,
             correlation_id=case.correlation_id,
@@ -421,6 +438,7 @@ def _fire(deps: RouteDeps) -> Callable[[FireRequest], Coroutine[Any, Any, FireRe
 async def _fire_sms(
     *,
     deps: RouteDeps,
+    ctx: UserContext,
     customer: CustomerRecord,
     dealer: DealerRecord,
     vehicle: VehicleRecord,
@@ -428,14 +446,17 @@ async def _fire_sms(
 ) -> FireResponse:
     """SMS arm of the Fire handler.
 
-    Builds an :class:`SmsContext` from saved master data, registers it
-    with the in-memory context registry so inbound replies can recover
-    the variables, then asks ``sms_adapter.open_conversation`` to send
-    the opening message.
+    Builds an :class:`SmsContext` from the user's saved master data,
+    registers it with the shared in-memory context registry so inbound
+    replies can recover the variables, then asks
+    ``sms_adapter.open_conversation`` to send the opening message.
 
-    Returns a :class:`FireResponse` shaped like the voice path so the
-    UI's status pill keeps working uniformly. ``case_id`` is filled
-    with the conversation id (an SMS conversation has no Case yet).
+    NOTE (Phase 1): the SMS adapter is still a single shared instance
+    across users — history, routing, and context registry are global.
+    Inbound routing today goes by phone number, so two users firing
+    against different customers/phones work independently. Two users
+    firing to the same phone follow the "replace prior conversation"
+    rule below.
     """
     if deps.sms_deps is None or deps.sms_contexts is None:
         raise HTTPException(
@@ -459,7 +480,7 @@ async def _fire_sms(
         customer=customer,
         dealer=dealer,
         vehicle=vehicle,
-        slots=deps.slots_repo.list(),
+        slots=ctx.slots_repo.list(),
         channel=request.channel,
         service_type=request.service_type,
         service_summary=request.service_summary,
@@ -467,7 +488,7 @@ async def _fire_sms(
         conversation_id=conversation_id,
     )
 
-    ctx = SmsContext(
+    sms_ctx = SmsContext(
         conversation_id=conversation_id,
         customer_phone=customer.phone,
         variables=variables,
@@ -490,13 +511,11 @@ async def _fire_sms(
             new_conversation_id=conversation_id,
         )
 
-    deps.sms_contexts.register(ctx)
+    deps.sms_contexts.register(sms_ctx)
 
     try:
-        opening = await open_conversation(ctx, deps=deps.sms_deps)
+        opening = await open_conversation(sms_ctx, deps=deps.sms_deps)
     except Exception as exc:
-        # Drop the registry entry so a retry doesn't trip the
-        # "phone already bound" guard.
         deps.sms_contexts.forget(conversation_id)
         deps.sms_deps.routing.unbind(phone=customer.phone)
         raise HTTPException(
@@ -506,6 +525,7 @@ async def _fire_sms(
 
     _log.info(
         "simulator.fire.accepted",
+        user_id=ctx.user.id,
         conversation_id=conversation_id,
         correlation_id=correlation_id,
         customer_id=customer.id,
@@ -514,7 +534,7 @@ async def _fire_sms(
         opening_chars=len(opening),
     )
     return FireResponse(
-        case_id=conversation_id,  # the UI just shows this in a pill
+        case_id=conversation_id,
         correlation_id=correlation_id,
         accepted_at=datetime.now(UTC),
     )
@@ -576,6 +596,13 @@ def _build_sms_variables(
 
 
 def _log_socket(deps: RouteDeps) -> Callable[[WebSocket], Coroutine[Any, Any, None]]:
+    """WebSocket feed for case events.
+
+    Phase 1: every connected client sees every event regardless of
+    which user they're operating as. Filtering by user_id will land
+    in Phase 2 when ``CaseEvent`` learns about the user dimension.
+    """
+
     async def handler(socket: WebSocket) -> None:
         await socket.accept()
         try:

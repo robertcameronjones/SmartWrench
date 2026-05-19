@@ -65,8 +65,24 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .brand-name { font-weight: 600; letter-spacing: 0.2px; }
 .brand-sub { color: var(--text-dim); font-size: 12px; }
 .agent-info { margin-left: auto; display: flex; align-items: baseline; gap: 6px; }
+.user-info { display: flex; align-items: baseline; gap: 6px; }
 .agent-label { color: var(--text-dim); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
 .agent-name { font-weight: 500; }
+.user-pill {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--bg-elev-2);
+  color: var(--text);
+}
+.user-pill[data-state="ok"] {
+  color: var(--good);
+  border-color: rgba(63, 185, 80, 0.35);
+  background: rgba(63, 185, 80, 0.12);
+}
 .topbar-status {
   display: inline-flex;
   align-items: center;

@@ -1,44 +1,43 @@
-"""HTTP Basic Auth middleware for the simulator.
+"""HTTP Basic Auth middleware: one mode, always on.
 
-Activates when BOTH ``BASIC_AUTH_USER`` and ``BASIC_AUTH_PASS`` env vars
-are set. When either is missing, the middleware no-ops, so local dev
-keeps working without configuration.
+The whole site is gated by HTTP Basic Auth. The auth *username* must
+match a user id in the :class:`UserRegistry`; the password must match
+its entry. On success the validated id is stashed on
+``request.state.user_id`` so the routes' ``get_user_context``
+dependency reads it directly.
 
-Exempt paths
-============
-- ``/sms`` — Twilio's inbound webhook. Twilio does NOT send Basic Auth
-  headers; that endpoint relies on its own X-Twilio-Signature header
-  (or SKIP_SIGNATURE_VALIDATION) for trust.
-- ``/twilio/*`` — the mounted Twilio debug app (messages list, health).
-  Same reason: Twilio's webhook lives under this prefix in some configs.
+Exempt paths (no auth required):
+
+- ``/sms`` — Twilio's inbound webhook (Twilio doesn't send Basic Auth
+  headers; that endpoint trusts X-Twilio-Signature instead).
+- ``/twilio/*`` — the mounted Twilio debug app.
+- ``/health`` — Render's liveness check has no credentials.
 
 WebSocket caveat
 ================
-Starlette HTTP middleware does not intercept WebSocket upgrades. The
-``/ws/log`` event stream is therefore NOT protected by this middleware.
-That's acceptable for the "block random visitors" use case — an attacker
-would still need to discover the path. If real auth is required, put
-Cloudflare Access in front instead.
+Starlette HTTP middleware doesn't intercept WebSocket upgrades, so
+``/ws/log`` isn't protected here. That's acceptable for "block random
+visitors" — the path is unguessable. For real auth put Cloudflare
+Access in front.
 """
 
 from __future__ import annotations
 
 import base64
 import hmac
-import os
-import secrets
 from collections.abc import Callable
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
+from simulator._users import UserRegistry
+
 _EXEMPT_PREFIXES: tuple[str, ...] = ("/sms", "/twilio", "/health")
+_REALM = 'Basic realm="kate-simulator"'
 
 
 class BasicAuthMiddleware(BaseHTTPMiddleware):
-    """Require HTTP Basic Auth when BASIC_AUTH_USER + BASIC_AUTH_PASS are set."""
-
     async def dispatch(
         self,
         request: Request,
@@ -47,49 +46,62 @@ class BasicAuthMiddleware(BaseHTTPMiddleware):
         if _is_exempt(request.url.path):
             return await call_next(request)
 
-        expected_user = os.getenv("BASIC_AUTH_USER", "")
-        expected_pass = os.getenv("BASIC_AUTH_PASS", "")
-        if not expected_user or not expected_pass:
-            # Auth not configured → behave as if middleware isn't installed.
-            return await call_next(request)
-
-        if not _credentials_match(
+        registry: UserRegistry = request.app.state.user_registry
+        validated_id = _validate(
             request.headers.get("authorization", ""),
-            expected_user=expected_user,
-            expected_pass=expected_pass,
-        ):
-            return Response(
-                status_code=401,
-                content="Authentication required.\n",
-                headers={"WWW-Authenticate": 'Basic realm="kate-simulator"'},
-                media_type="text/plain",
-            )
+            registry=registry,
+        )
+        if validated_id is None:
+            return _unauthorized()
+        request.state.user_id = validated_id
         return await call_next(request)
 
 
 def _is_exempt(path: str) -> bool:
-    return any(path == prefix or path.startswith(prefix + "/") for prefix in _EXEMPT_PREFIXES)
+    return any(
+        path == prefix or path.startswith(prefix + "/") for prefix in _EXEMPT_PREFIXES
+    )
 
 
-def _credentials_match(
-    authorization_header: str,
-    *,
-    expected_user: str,
-    expected_pass: str,
-) -> bool:
-    """Constant-time check of an ``Authorization: Basic ...`` header."""
+def _unauthorized() -> Response:
+    return Response(
+        status_code=401,
+        content="Authentication required.\n",
+        headers={"WWW-Authenticate": _REALM},
+        media_type="text/plain",
+    )
+
+
+def _validate(authorization_header: str, *, registry: UserRegistry) -> str | None:
+    """Return the validated user id, or None on auth failure.
+
+    Always runs a constant-time compare against *some* string even
+    for unknown users so the failure mode doesn't leak whether the
+    username or the password was wrong.
+    """
     scheme, _, encoded = authorization_header.partition(" ")
     if scheme.lower() != "basic" or not encoded:
-        return False
+        return None
     try:
         decoded = base64.b64decode(encoded.encode("ascii"), validate=True).decode("utf-8")
     except (ValueError, UnicodeDecodeError):
-        return False
-    user, _, password = decoded.partition(":")
-    # secrets.compare_digest is constant-time; resists timing attacks.
-    user_ok = secrets.compare_digest(user.encode("utf-8"), expected_user.encode("utf-8"))
-    pass_ok = hmac.compare_digest(password.encode("utf-8"), expected_pass.encode("utf-8"))
-    return user_ok and pass_ok
+        return None
+    user_id, sep, password = decoded.partition(":")
+    if not sep:
+        return None
+
+    try:
+        user = registry.get(user_id)
+        expected = user.password
+    except Exception:
+        expected = ""
+
+    if not hmac.compare_digest(password.encode("utf-8"), expected.encode("utf-8")):
+        return None
+    if not expected:
+        # Unknown user; compare passed only because both sides were empty.
+        return None
+    return user_id
 
 
 __all__ = ["BasicAuthMiddleware"]

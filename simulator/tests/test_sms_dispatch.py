@@ -42,9 +42,13 @@ from simulator._sms_context_registry import SmsContextRegistry
 from tests._helpers import (
     FixedClock,
     StubProbe,
+    UserClient,
     healthy_status,
     seed_master_data,
 )
+
+TEST_USER = "demo"
+TEST_PASSWORD = "demo"
 
 
 # --------------------------------------------------------------------------- #
@@ -155,11 +159,16 @@ def client_with_sms(
     tmp_path: Path,
     fake_twilio: FakeTwilio,
     fake_llm: FakeLlm,
-) -> tuple[TestClient, SmsContextRegistry, RoutingStore, HistoryStore]:
+) -> tuple[UserClient, SmsContextRegistry, RoutingStore, HistoryStore]:
     app, contexts, routing, history = _build_test_app(
         tmp_path, fake_twilio=fake_twilio, fake_llm=fake_llm
     )
-    return TestClient(app), contexts, routing, history
+    return (
+        UserClient(TestClient(app), user=TEST_USER, password=TEST_PASSWORD),
+        contexts,
+        routing,
+        history,
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -170,7 +179,7 @@ def client_with_sms(
 class TestSmsFire:
     def test_fire_sms_sends_opening_and_binds_phone(
         self,
-        client_with_sms: tuple[TestClient, SmsContextRegistry, RoutingStore, HistoryStore],
+        client_with_sms: tuple[UserClient, SmsContextRegistry, RoutingStore, HistoryStore],
         fake_twilio: FakeTwilio,
     ) -> None:
         client, contexts, routing, history = client_with_sms
@@ -224,13 +233,7 @@ class TestSmsFire:
             sms_deps=None,
             sms_contexts=None,
         )
-        # The factory inside build_app will try to read env vars and
-        # likely return None too; if the operator's env happens to be
-        # populated this test would pick up real deps. Force-disable
-        # by clearing the deps post-construction is awkward, so we
-        # accept either 503 (no env) or 200/502 (env present) here —
-        # the contract we care about is "voice still works either way."
-        client = TestClient(app)
+        client = UserClient(TestClient(app), user=TEST_USER, password=TEST_PASSWORD)
         res = client.post(
             "/api/fire",
             json={
@@ -246,7 +249,7 @@ class TestSmsFire:
 class TestSmsInboundWebhook:
     def test_inbound_routes_through_adapter_and_sends_reply(
         self,
-        client_with_sms: tuple[TestClient, SmsContextRegistry, RoutingStore, HistoryStore],
+        client_with_sms: tuple[UserClient, SmsContextRegistry, RoutingStore, HistoryStore],
         fake_twilio: FakeTwilio,
         fake_llm: FakeLlm,
         monkeypatch: pytest.MonkeyPatch,
@@ -271,8 +274,8 @@ class TestSmsInboundWebhook:
         conversation_id = fire_res.json()["case_id"]
         assert len(fake_twilio.sent) == 1  # opening
 
-        # Customer texts back. Hit the mounted webhook path.
-        inbound = client.post(
+        # Customer texts back. Webhook is global (no user param) — raw.
+        inbound = client.raw.post(
             "/sms-webhook/sms",
             data={
                 "From": "+13135550000",
@@ -304,7 +307,7 @@ class TestSmsInboundWebhook:
 
     def test_inbound_unknown_phone_is_logged_not_raised(
         self,
-        client_with_sms: tuple[TestClient, SmsContextRegistry, RoutingStore, HistoryStore],
+        client_with_sms: tuple[UserClient, SmsContextRegistry, RoutingStore, HistoryStore],
         fake_twilio: FakeTwilio,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
@@ -312,8 +315,9 @@ class TestSmsInboundWebhook:
 
         monkeypatch.setenv("SKIP_SIGNATURE_VALIDATION", "1")
 
-        # No prior /api/fire — phone has no bound conversation.
-        res = client.post(
+        # No prior /api/fire — phone has no bound conversation. Webhook
+        # is global, hit it via the raw client.
+        res = client.raw.post(
             "/sms-webhook/sms",
             data={
                 "From": "+19995550000",
