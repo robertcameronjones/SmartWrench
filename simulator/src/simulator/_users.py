@@ -1,6 +1,6 @@
 """Per-user data namespace and identity.
 
-One env var: ``USERS=robert:pw1,alice:pw2,bob:pw3``.
+One env var: ``USERS=id:password,id:password,...``.
 
 Each entry is ``id:password``. The HTTP Basic Auth middleware
 (``simulator._basic_auth``) gates the whole site: the auth username

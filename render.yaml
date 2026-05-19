@@ -58,7 +58,8 @@ services:
       # fixtures/ on first authenticated request. HTTP Basic Auth is
       # always required; the browser's username IS the operator id.
       # Defaults to "demo:demo" if unset (dev only; logged loudly).
-      # Example: USERS=robert:hunter2,alice:s3cret,bob:p4ssword
+      # Generate a fresh set with: python gen_passwords.py
+      # (root of repo; see that script for the active operator list).
       - key: USERS
         sync: false
 
