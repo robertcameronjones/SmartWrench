@@ -18,6 +18,7 @@ Per the operator's mental model (2026-05-10):
 
 from __future__ import annotations
 
+import os
 import secrets
 from collections.abc import Callable, Coroutine, Iterable
 from dataclasses import dataclass
@@ -173,7 +174,9 @@ def _index(deps: RouteDeps) -> Callable[[Request], Coroutine[Any, Any, HTMLRespo
         return deps.templates.TemplateResponse(
             request=request,
             name="index.html",
-            context={},
+            context={
+                "deployment_label": os.environ.get("DEPLOYMENT_LABEL", "").strip(),
+            },
         )
 
     return handler

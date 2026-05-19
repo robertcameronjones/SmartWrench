@@ -11,6 +11,7 @@
     <div class="brand">
       <span class="brand-name">Guidepoint</span>
       <span class="brand-sub">Simulator</span>
+      {% if deployment_label %}<span class="deployment-pill">{{ deployment_label }}</span>{% endif %}
     </div>
     <div class="agent-info">
       <span class="agent-label">Agent</span>
