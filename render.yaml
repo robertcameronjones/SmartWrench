@@ -18,7 +18,7 @@ services:
     runtime: python
     plan: starter            # $7/mo. Free tier sleeps and breaks Twilio webhooks.
     autoDeploy: true         # redeploy on push to the connected branch
-    healthCheckPath: /
+    healthCheckPath: /health
 
     buildCommand: |
       pip install --upgrade pip

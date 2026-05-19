@@ -99,6 +99,7 @@ def build_router(*, deps: RouteDeps) -> APIRouter:
     """Construct the FastAPI router with handlers bound to ``deps``."""
     router = APIRouter()
     router.add_api_route("/", _index(deps), response_class=HTMLResponse)
+    router.add_api_route("/health", _health(), methods=["GET", "HEAD"])
 
     router.add_api_route(
         "/api/master-data",
@@ -152,6 +153,19 @@ def build_router(*, deps: RouteDeps) -> APIRouter:
 # --------------------------------------------------------------------------- #
 # Handlers                                                                    #
 # --------------------------------------------------------------------------- #
+
+
+def _health() -> Callable[[], dict[str, str]]:
+    """Liveness endpoint for Render's healthcheck. Always returns 200.
+
+    Exempt from BasicAuthMiddleware (see _EXEMPT_PREFIXES) so Render's
+    healthcheck can succeed without credentials.
+    """
+
+    def handler() -> dict[str, str]:
+        return {"status": "ok"}
+
+    return handler
 
 
 def _index(deps: RouteDeps) -> Callable[[Request], Coroutine[Any, Any, HTMLResponse]]:
