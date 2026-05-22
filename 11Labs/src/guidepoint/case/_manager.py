@@ -1,11 +1,31 @@
 """Case Manager — orchestrates one trigger → one case → one+ call attempts.
 
-The case manager is the **only** public entry point for placing calls
-to ElevenLabs (per ADR 0006). It loads master data through the
-``MasterDataRepository``, builds a ``Case`` via ``create_case_from_trigger``,
-persists it through ``CaseRepository``, delegates the actual call to
+The case manager is the **only** public entry point for starting customer
+interactions (per ADR 0006), regardless of channel. It loads master data
+through the ``MasterDataRepository``, builds a ``Case`` via
+``create_case_from_trigger``, persists it through ``CaseRepository``,
+delegates the actual interaction to the channel-appropriate
 ``CallSession``, and walks the case through its terminal state based on
 the ``CallOutcome`` returned.
+
+Two entry points:
+
+- ``start(trigger)`` — builds the case, transitions it to ``CALLING``,
+  spawns the call attempt as a background task, and returns
+  immediately. The terminal state lands on the case (and on the bus)
+  whenever the channel session finishes. **Use this for any channel
+  whose conversation can outlive the HTTP request that fired it** —
+  SMS conversations can run for hours, so the route handler must not
+  block on them.
+- ``fire(trigger)`` — same pipeline, but awaits the background task
+  before returning. Convenient for tests / CLI tools that want the
+  terminal case in hand.
+
+Channel routing: the manager holds one ``CallSession`` per
+``Channel`` (today: ``"voice"`` for the ElevenLabs adapter, ``"sms"``
+for the SMS adapter). ``trigger.channel_preference`` picks which one
+runs an attempt — the manager's state machine doesn't know or care
+which channel ran.
 
 The retry policy is encapsulated in ``RetryPolicy`` (today: single-shot,
 no retries). The state-transition decision is a **pure function**
@@ -15,7 +35,9 @@ of the I/O.
 
 from __future__ import annotations
 
+import asyncio
 import secrets
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Protocol, final
 
@@ -27,9 +49,11 @@ from guidepoint.case._models import (
     CallAttempt,
     CallOutcome,
     Case,
+    CaseError,
     CaseEvent,
     CaseId,
     CaseState,
+    Channel,
     Trigger,
     TriggerForeignKeyError,
 )
@@ -60,24 +84,39 @@ class RetryPolicy:
 
 
 class CaseManager(Protocol):
-    """SPOT to ElevenLabs. Owns the case state machine."""
+    """SPOT to every channel. Owns the case state machine."""
 
-    async def fire(self, trigger: Trigger) -> Case:
-        """Create a case from the trigger, place the first call, return the case.
+    async def start(self, trigger: Trigger) -> Case:
+        """Create the case, spawn its attempt in the background, return immediately.
 
-        Pipeline:
+        Pipeline (synchronous portion, before returning):
 
         1. Load customer / dealer / vehicle from master data.
         2. ``create_case_from_trigger`` → new Case in state CREATED.
         3. Persist + publish ``case.created``.
         4. Transition to CALLING; persist + publish ``case.calling``.
-        5. ``call_session.place(case)`` → returns ``CallOutcome``.
-        6. Append the attempt to the case.
-        7. Decide terminal state from outcome + retry policy.
-        8. Persist outcome + publish terminal event.
-        9. Mark trigger as fired in the trigger source.
+        5. Spawn the background attempt task.
 
-        Returns the Case in its (potentially terminal) end state.
+        Background portion (runs after start returns):
+
+        6. ``call_session.place(case)`` → returns ``CallOutcome``.
+        7. Append the attempt to the case.
+        8. Decide terminal state from outcome + retry policy.
+        9. Persist outcome + publish terminal event.
+        10. Mark trigger as fired in the trigger source.
+
+        Returns the Case in ``state=CALLING``. Subscribe to the
+        ``EventBus`` (or poll ``case_repo``) to observe the terminal
+        transition.
+        """
+        ...
+
+    async def fire(self, trigger: Trigger) -> Case:
+        """``start(trigger)`` and await the background attempt to completion.
+
+        Returns the Case in its terminal state. Convenient for tests
+        and short-lived voice calls; do not use from an HTTP request
+        handler that might serve an SMS case.
         """
         ...
 
@@ -91,17 +130,39 @@ def build_default_case_manager(
     master_data: MasterDataRepository,
     case_repo: CaseRepository,
     trigger_source: TriggerSource,
-    call_session: CallSession,
     bus: _CaseEventBus,
     clock: Clock,
+    call_session: CallSession | None = None,
+    call_sessions: Mapping[Channel, CallSession] | None = None,
     retry_policy: RetryPolicy | None = None,
 ) -> CaseManager:
-    """Construct the default ``CaseManager`` with all dependencies injected."""
+    """Construct the default ``CaseManager`` with all dependencies injected.
+
+    Exactly one of ``call_session`` or ``call_sessions`` must be
+    provided. ``call_session`` is the legacy shorthand for a voice-only
+    deployment; it's wrapped as ``{"voice": call_session}``.
+    ``call_sessions`` is the modern form that supports SMS too.
+    """
+    if call_session is not None and call_sessions is not None:
+        raise CaseError(
+            "build_default_case_manager: pass either call_session "
+            "(legacy voice-only) or call_sessions (channel mapping), not both"
+        )
+    if call_session is None and call_sessions is None:
+        raise CaseError(
+            "build_default_case_manager: must pass call_session "
+            "(legacy voice-only) or call_sessions (channel mapping)"
+        )
+    resolved_sessions: dict[Channel, CallSession] = (
+        {"voice": call_session} if call_session is not None else dict(call_sessions or {})
+    )
+    if not resolved_sessions:
+        raise CaseError("build_default_case_manager: call_sessions is empty")
     return _DefaultCaseManager(
         master_data=master_data,
         case_repo=case_repo,
         trigger_source=trigger_source,
-        call_session=call_session,
+        call_sessions=resolved_sessions,
         bus=bus,
         clock=clock,
         retry_policy=retry_policy or RetryPolicy(),
@@ -118,7 +179,7 @@ class _DefaultCaseManager:
         master_data: MasterDataRepository,
         case_repo: CaseRepository,
         trigger_source: TriggerSource,
-        call_session: CallSession,
+        call_sessions: Mapping[Channel, CallSession],
         bus: _CaseEventBus,
         clock: Clock,
         retry_policy: RetryPolicy,
@@ -126,20 +187,66 @@ class _DefaultCaseManager:
         self._master_data = master_data
         self._case_repo = case_repo
         self._trigger_source = trigger_source
-        self._call_session = call_session
+        self._call_sessions: dict[Channel, CallSession] = dict(call_sessions)
         self._bus = bus
         self._clock = clock
         self._retry_policy = retry_policy
 
+    async def start(self, trigger: Trigger) -> Case:
+        case = await self._initialize(trigger)
+        # Fire-and-forget: terminal state lands on the bus when the
+        # background attempt completes. We log on failure inside the
+        # wrapper rather than letting an unhandled task exception go to
+        # the asyncio default handler (which would just print to stderr).
+        _ = asyncio.create_task(
+            self._run_attempt_logged(case=case, trigger_id=trigger.id),
+            name=f"case-attempt-{case.case_id}",
+        )
+        return case
+
     async def fire(self, trigger: Trigger) -> Case:
+        case = await self._initialize(trigger)
+        await self._run_attempt(case=case, trigger_id=trigger.id)
+        return self._case_repo.get(case.case_id)
+
+    async def cancel(self, case_id: CaseId, *, reason: str) -> Case:
+        case = self._case_repo.update_outcome(
+            case_id,
+            new_state=CaseState.CANCELLED,
+            outcome_detail=reason,
+            booked_slot_id=None,
+            closed_at=self._clock.now(),
+        )
+        await self._emit(case, "case.cancelled", reason)
+        return case
+
+    async def _initialize(self, trigger: Trigger) -> Case:
+        """Build the case, persist it, transition to CALLING, emit.
+
+        Synchronous from the caller's POV: any error here surfaces to
+        the route handler as a 409 / 500 rather than getting swallowed
+        in a background task. Once we return CALLING, ownership flips
+        to the background attempt.
+        """
         case = self._build_case(trigger)
         self._case_repo.save(case)
         await self._emit(case, "case.created", f"trigger={trigger.id}")
 
         case = self._case_repo.update_state(case.case_id, new_state=CaseState.CALLING)
         await self._emit(case, "case.calling", f"attempt {case.attempt_count + 1}")
+        return case
 
-        outcome = await self._call_session.place(case)
+    async def _run_attempt(self, *, case: Case, trigger_id: str) -> None:
+        """Place the attempt, append it, decide terminal, persist + emit + mark trigger."""
+        session = self._call_sessions.get(case.channel)
+        if session is None:
+            available = ", ".join(sorted(self._call_sessions.keys())) or "(none)"
+            raise CaseError(
+                f"no CallSession registered for channel {case.channel!r} "
+                f"(available: {available})"
+            )
+
+        outcome = await session.place(case)
         case = self._case_repo.append_call_attempt(
             case.case_id,
             CallAttempt(attempt_number=case.attempt_count + 1, outcome=outcome),
@@ -159,26 +266,55 @@ class _DefaultCaseManager:
         )
         await self._emit(case, f"case.{terminal_state.value}", detail)
 
-        self._trigger_source.mark_fired(trigger.id, case_id=case.case_id)
+        self._trigger_source.mark_fired(trigger_id, case_id=case.case_id)
         _log.info(
-            "case.fire.complete",
+            "case.attempt.complete",
             case_id=case.case_id,
-            trigger_id=trigger.id,
+            trigger_id=trigger_id,
+            channel=case.channel,
             terminal_state=terminal_state.value,
             correlation_id=case.correlation_id,
         )
-        return case
 
-    async def cancel(self, case_id: CaseId, *, reason: str) -> Case:
-        case = self._case_repo.update_outcome(
-            case_id,
-            new_state=CaseState.CANCELLED,
-            outcome_detail=reason,
-            booked_slot_id=None,
-            closed_at=self._clock.now(),
-        )
-        await self._emit(case, "case.cancelled", reason)
-        return case
+    async def _run_attempt_logged(self, *, case: Case, trigger_id: str) -> None:
+        """Wrapper for the fire-and-forget code path.
+
+        ``asyncio.create_task`` swallows exceptions until the task is
+        awaited; the ``start()`` caller never awaits, so we log here
+        and best-effort write a terminal UNREACHABLE on the case so
+        the operator isn't left staring at a CALLING that never
+        resolves.
+        """
+        try:
+            await self._run_attempt(case=case, trigger_id=trigger_id)
+        except Exception as exc:
+            _log.error(
+                "case.attempt.errored",
+                case_id=case.case_id,
+                trigger_id=trigger_id,
+                channel=case.channel,
+                error=f"{type(exc).__name__}: {exc}",
+            )
+            try:
+                terminal = self._case_repo.update_outcome(
+                    case.case_id,
+                    new_state=CaseState.UNREACHABLE,
+                    outcome_detail=f"attempt errored: {type(exc).__name__}: {exc}",
+                    booked_slot_id=None,
+                    closed_at=self._clock.now(),
+                )
+                await self._emit(
+                    terminal,
+                    "case.unreachable",
+                    f"attempt errored: {type(exc).__name__}: {exc}",
+                )
+                self._trigger_source.mark_failed(trigger_id, error_detail=str(exc))
+            except Exception as inner:
+                _log.error(
+                    "case.attempt.finalize_failed",
+                    case_id=case.case_id,
+                    error=f"{type(inner).__name__}: {inner}",
+                )
 
     def _build_case(self, trigger: Trigger) -> Case:
         try:

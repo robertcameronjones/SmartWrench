@@ -1,10 +1,14 @@
-"""Build the SMS dependency bundle from environment + project layout.
+"""Build the SMS ``CallSession`` (and routing store reference) from env + disk.
 
-One job: assemble the live :class:`SmsDeps` (Twilio sender, LLM
-completer, JSON history store, JSON routing store, prompt paths) plus
-the in-memory :class:`SmsContextRegistry`. Returns ``None, None`` if
-the SMS env vars aren't set so the simulator boots fine for voice-only
-operators.
+One job: assemble the live :class:`SmsCallSession` (Twilio sender,
+LiteLLM completer, JSON history store, JSON routing store, prompt
+paths) and return it along with the routing store. The webhook
+handler in ``simulator._app`` needs the routing store to translate
+``phone -> case_id`` for inbound texts.
+
+Returns ``(None, None)`` if the SMS env vars aren't set so the
+simulator boots fine for voice-only operators; the Fire route
+surfaces a 503 if the operator picks channel=sms in that state.
 
 Required env vars for SMS (already present in ``sms/.env`` +
 ``llm/.env`` from the existing standalone tools):
@@ -28,35 +32,44 @@ from pathlib import Path
 
 import structlog
 
+from guidepoint.case import CaseEvent, CaseRepository
+from guidepoint.clock import Clock
+from guidepoint.events import EventBus
 from prompt_composer import PromptPaths
 from sms_adapter import (
-    SmsDeps,
+    RoutingStore,
+    SmsCallSession,
     build_json_history_store,
     build_json_routing_store,
     build_litellm_completer,
+    build_sms_call_session,
     build_twilio_sender,
 )
-
-from simulator._sms_context_registry import SmsContextRegistry
 
 _log = structlog.get_logger(__name__)
 
 
-def build_sms_deps(
+def build_sms_session(
     *,
     project_root: Path,
-) -> tuple[SmsDeps | None, SmsContextRegistry | None]:
-    """Compose live :class:`SmsDeps` + a fresh registry, or ``(None, None)``.
+    case_repo: CaseRepository,
+    bus: EventBus[CaseEvent],
+    clock: Clock,
+) -> tuple[SmsCallSession | None, RoutingStore | None]:
+    """Compose the live :class:`SmsCallSession` + its routing store, or ``(None, None)``.
 
-    Returns ``(None, None)`` when any required env var is missing — the
-    Fire route surfaces a 503 if the operator selects channel=sms in
-    that state, but the rest of the simulator (voice) still works.
+    The routing store is returned alongside so the inbound webhook
+    handler can translate ``phone -> case_id`` without reaching into
+    the session's internals. Returns ``(None, None)`` when any
+    required env var is missing — the Fire route surfaces a 503 if
+    the operator selects channel=sms in that state, but voice still
+    works.
     """
     account_sid = (os.environ.get("TWILIO_ACCOUNT_SID") or "").strip()
     auth_token = (os.environ.get("TWILIO_AUTH_TOKEN") or "").strip()
     from_number = (os.environ.get("TWILIO_FROM_NUMBER") or "").strip()
     # Default to the model the operator already round-tripped via the
-    # llm/ chat CLI yesterday. Overridable with LLM_MODEL=... .
+    # llm/ chat CLI. Overridable with LLM_MODEL=... .
     model = (os.environ.get("LLM_MODEL") or "openrouter/openai/gpt-oss-20b:free").strip()
 
     missing = [
@@ -89,19 +102,23 @@ def build_sms_deps(
         sms=workspace_root / "sms_adapter" / "config" / "sms.md",
     )
 
-    deps = SmsDeps(
+    history = build_json_history_store(root=history_dir)
+    routing = build_json_routing_store(path=routing_path)
+    session = build_sms_call_session(
         twilio_send=build_twilio_sender(
             account_sid=account_sid,
             auth_token=auth_token,
             from_number=from_number,
         ),
         llm_complete=build_litellm_completer(model=model, event_log_path=event_log_path),
-        history=build_json_history_store(root=history_dir),
-        routing=build_json_routing_store(path=routing_path),
+        history=history,
+        routing=routing,
         prompt_paths=prompt_paths,
+        case_repo=case_repo,
+        bus=bus,
+        clock=clock,
         event_log_path=event_log_path,
     )
-    registry = SmsContextRegistry()
     _log.info(
         "simulator.sms.enabled",
         from_number=from_number,
@@ -110,7 +127,7 @@ def build_sms_deps(
         routing_path=str(routing_path),
         event_log_path=str(event_log_path),
     )
-    return deps, registry
+    return session, routing
 
 
-__all__ = ["build_sms_deps"]
+__all__ = ["build_sms_session"]

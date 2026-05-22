@@ -204,6 +204,7 @@ underlying records.
 | `vehicle` | `VehicleRecord` | yes | snapshot | Frozen copy of the vehicle at fire time. |
 | `service_event` | `ServiceEvent` | yes | snapshot | Copied from the trigger. |
 | `offered_slots` | tuple[OfferedSlot] | no, default `[]` | snapshot | Copied from the trigger. |
+| `channel` | `"voice" \| "sms"` | no, default `"voice"` | enum | Snapshotted from `Trigger.channel_preference` at fire time. Drives which `CallSession` the manager dispatches to. |
 | `state` | `CaseState` | no, default `created` | enum | Where in the business lifecycle this case is. See below. |
 | `attempt_count` | int | no, default 0 | ≥ 0 | Number of call attempts placed so far. |
 | `next_attempt_at` | datetime \| null | no, default null | tz-aware UTC | If retryable, when to try again. |

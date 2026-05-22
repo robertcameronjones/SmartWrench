@@ -8,23 +8,45 @@ form payload — there is no trigger picker and no trigger fixture file.
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
+from typing import Any
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from guidepoint.case import CaseEvent
+from guidepoint.case import Case, CallOutcome, CaseEvent, SlotId
 from guidepoint.events import build_event_bus
 from simulator import build_app
-from tests.case._helpers import FakeBookedCallSession
-from tests.simulator._helpers import (
+from tests._helpers import (
     FixedClock,
     StubProbe,
     UserClient,
     healthy_status,
     seed_master_data,
 )
+
+
+# In-tree fake voice CallSession so the route tests don't need to
+# reach into the 11Labs test helpers package. Deterministic ``booked``
+# outcome with the canonical ``slot_a`` so manager assertions are stable.
+class FakeBookedCallSession:
+    async def place(self, case: Case) -> CallOutcome:
+        from datetime import UTC, datetime
+
+        booked = case.offered_slots[0].id if case.offered_slots else SlotId("slot_a")
+        now = datetime(2026, 5, 10, 12, 0, 0, tzinfo=UTC)
+        return CallOutcome(
+            result="answered",
+            business_outcome="booked",
+            booked_slot_id=booked,
+            elevenlabs_conversation_id="fake_conv_test",
+            started_at=now,
+            ended_at=now,
+            duration_seconds=0.0,
+            transcript="(fake test outcome)",
+        )
 
 # All API routes are gated by per-user HTTP Basic Auth (v2 phase 1).
 # Tests use the default "demo:demo" user; UserClient sends the auth
@@ -42,6 +64,36 @@ def _build_test_app(tmp_path: Path) -> FastAPI:
         bus=build_event_bus(payload_type=CaseEvent),
         probe=StubProbe(status=healthy_status(clock=clock)),
         call_session=FakeBookedCallSession(),
+    )
+
+
+def _wait_for_state(
+    client: UserClient,
+    case_id: str,
+    states: set[str],
+    *,
+    timeout_seconds: float = 2.0,
+) -> dict[str, Any]:
+    """Poll ``GET /api/cases/{id}`` until ``state`` is in ``states`` or timeout.
+
+    ``CaseManager.start`` runs the call attempt in a background task,
+    so tests that want to assert on the terminal Case have to wait
+    for the task to finish. With the ``FakeBookedCallSession`` this
+    is sub-millisecond in practice; the timeout is generous in case
+    the event loop is slow.
+    """
+    deadline = time.monotonic() + timeout_seconds
+    last: dict[str, Any] = {}
+    while time.monotonic() < deadline:
+        res = client.get(f"/api/cases/{case_id}")
+        if res.status_code == 200:
+            last = res.json()
+            if last.get("state") in states:
+                return last
+        time.sleep(0.01)
+    raise AssertionError(
+        f"case {case_id!r} did not reach a state in {states} within "
+        f"{timeout_seconds}s (last: {last.get('state')!r})"
     )
 
 
@@ -171,13 +223,22 @@ class TestFireEndpoint:
 
 class TestRecentCasesApi:
     def test_lists_after_fire(self, client: UserClient) -> None:
-        client.post(
+        # ``/api/fire`` now calls ``CaseManager.start`` which returns
+        # immediately with the case in CALLING and runs the attempt
+        # in a background task. Poll briefly until the fake call
+        # session has finished and the case lands on its terminal
+        # state, then assert.
+        res = client.post(
             "/api/fire",
             json={"service_type": "maintenance", "service_summary": "oil change"},
         )
+        assert res.status_code == 200
+        case_id = res.json()["case_id"]
+        terminal_states = {"booked", "unreachable", "declined", "escalated"}
+        case = _wait_for_state(client, case_id, terminal_states)
         cases = client.get("/api/cases").json()
         assert len(cases) == 1
-        assert cases[0]["state"] in {"booked", "unreachable", "declined", "escalated"}
+        assert case["state"] in terminal_states
 
     def test_get_missing_case_404s(self, client: UserClient) -> None:
         assert client.get("/api/cases/nope").status_code == 404

@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from simulator import build_env_connection_probe
-from tests.simulator._helpers import FixedClock
+from tests._helpers import FixedClock
 
 
 @pytest.fixture(autouse=True)

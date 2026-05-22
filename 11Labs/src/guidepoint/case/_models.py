@@ -130,6 +130,12 @@ class Trigger(BaseModel):
     created_at: datetime
     fired_at: datetime | None = None
     error_detail: str = ""
+    # Operator who fired this trigger (auth username today). Empty
+    # string when no operator identity is available (e.g. monitor task
+    # in production). Snapshotted onto the resulting ``Case.user_id``
+    # at fire time so the inbound SMS webhook can find the right
+    # per-user state (once per-user case repos land).
+    user_id: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -289,7 +295,7 @@ class PostCallReport(BaseModel):
 # ---------------------------------------------------------------------------
 
 EventLevel = Literal["info", "warn", "error", "debug"]
-EventSource = Literal["system", "elevenlabs", "tool_webhook", "operator"]
+EventSource = Literal["system", "elevenlabs", "sms", "tool_webhook", "operator"]
 
 
 class CaseEvent(BaseModel):
@@ -345,6 +351,21 @@ class Case(BaseModel):
     service_event: ServiceEvent
     offered_slots: tuple[OfferedSlot, ...] = ()
 
+    # Channel the case is being run on. Snapshotted from
+    # ``Trigger.channel_preference`` at fire time so the manager can
+    # route to the right ``CallSession`` and the prompt composer can
+    # render channel-specific addenda without re-reading the trigger.
+    # Defaults to ``"voice"`` for backward-compat with case JSON files
+    # written before this field existed.
+    channel: Channel = "voice"
+
+    # Operator who fired the trigger that created this case. Empty
+    # string when no operator identity exists (production monitor task)
+    # or for cases serialized before this field was introduced. Used
+    # today by the inbound SMS webhook for audit logging; future
+    # per-user case repos will route on this.
+    user_id: str = ""
+
     # State machine.
     state: CaseState = CaseState.CREATED
     attempt_count: int = Field(ge=0, default=0)
@@ -370,7 +391,7 @@ class Case(BaseModel):
         ``Case.variable_keys()`` to enforce that contract.
         """
         return {
-            "channel": "voice",
+            "channel": self.channel,
             "case_id": self.case_id,
             "trigger_id": self.trigger_id,
             "customer_id": self.customer.id,
@@ -499,6 +520,7 @@ def _audit_sample_case() -> Case:
             },
             "service_event": {"type": "maintenance", "summary": "sample"},
             "offered_slots": [],
+            "channel": "voice",
             "state": "created",
             "attempt_count": 0,
             "created_at": "2026-01-01T00:00:00Z",

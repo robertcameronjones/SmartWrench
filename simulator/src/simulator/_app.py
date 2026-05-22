@@ -6,12 +6,13 @@ adapters. Either way no module reaches for a global.
 
 Per ADR 0006 the simulator hosts the same ``CaseManager`` the
 production system will run; the only thing it swaps is the
-``CallSession`` (live ElevenLabs adapter is the only implementation).
+per-channel ``CallSession`` (live ElevenLabs for voice, the in-process
+``SmsCallSession`` for SMS).
 
 The trigger source is the in-memory ``EphemeralTriggerSource`` — the
 operator composes a trigger by typing service type + summary in the
 UI, the fire route synthesizes the Trigger from saved master data,
-hands it to ``CaseManager``, and discards it after.
+hands it to ``CaseManager.start``, and discards it after.
 
 Per-user data namespacing (v2)
 ==============================
@@ -23,10 +24,20 @@ directory from ``fixtures/`` if missing.
 
 Each user's :class:`CaseManager` is wired with that user's
 ``master_data`` but reuses the **global** ``case_repo``,
-``trigger_source``, and ``call_session``. That way customer / dealer
-/ vehicle lookups during ``fire()`` hit the user's namespace, while
-case files land in the shared ``cases/`` dir where the live
-ElevenLabs ``CallSession`` callback can find them.
+``trigger_source``, and ``call_sessions`` (voice + sms). That way
+customer / dealer / vehicle lookups during ``start()`` hit the
+user's namespace, while case files land in the shared ``cases/`` dir
+where the live ElevenLabs voice callback and the SMS inbound
+webhook can find them.
+
+SMS inbound webhook
+===================
+Twilio POSTs every inbound SMS to ``/sms``. The handler resolves
+``phone -> case_id`` via the SMS routing store, then calls
+``SmsCallSession.deliver_inbound(case_id=...)``. The session's per-case
+``place()`` coroutine dequeues the turn, runs one LLM exchange, and
+sends the reply. Inbounds for phones with no active session are
+logged and dropped (Twilio still sees a 200 so it doesn't retry).
 """
 
 from __future__ import annotations
@@ -42,7 +53,9 @@ from fastapi.templating import Jinja2Templates
 
 from guidepoint.case import (
     CaseEvent,
+    CaseId,
     CaseRepository,
+    Channel,
     JsonCasePaths,
     RetryPolicy,
     TriggerSource,
@@ -54,11 +67,7 @@ from guidepoint.clock import Clock, build_system_clock
 from guidepoint.events import EventBus, build_event_bus
 from sms.server import app as sms_webhook_app
 from sms.server import inbound_sms, register_inbound_handler
-from sms_adapter import (
-    InboundForUnknownPhoneError,
-    SmsDeps,
-    handle_inbound,
-)
+from sms_adapter import RoutingStore, SmsCallSession
 
 from simulator._basic_auth import BasicAuthMiddleware
 from simulator._connection import ConnectionProbe, build_env_connection_probe
@@ -69,8 +78,7 @@ from simulator._routes import (
     package_static_dir,
     package_templates_dir,
 )
-from simulator._sms_context_registry import SmsContextRegistry
-from simulator._sms_setup import build_sms_deps
+from simulator._sms_setup import build_sms_session
 from simulator._users import UserContextRegistry, UserRegistry
 
 _log = structlog.get_logger(__name__)
@@ -84,10 +92,10 @@ def build_app(
     case_repo: CaseRepository | None = None,
     trigger_source: TriggerSource | None = None,
     call_session: CallSession | None = None,
+    sms_session: SmsCallSession | None = None,
+    sms_routing: RoutingStore | None = None,
     probe: ConnectionProbe | None = None,
     retry_policy: RetryPolicy | None = None,
-    sms_deps: SmsDeps | None = None,
-    sms_contexts: SmsContextRegistry | None = None,
     user_registry: UserRegistry | None = None,
 ) -> FastAPI:
     """Compose the simulator application.
@@ -97,6 +105,12 @@ def build_app(
     default ``call_session`` is the live ElevenLabs adapter — there
     is no stub. Tests that don't want to place real calls inject a
     fake via the ``call_session`` parameter.
+
+    ``sms_session`` + ``sms_routing`` go together: pass both for SMS
+    testing with fakes, or pass neither to let the factory build the
+    live SMS session from env vars (returns ``(None, None)`` when
+    Twilio env vars are missing; the Fire route 503s on channel=sms
+    in that state).
 
     ``user_registry`` defaults to one parsed from the ``USERS`` env
     var; tests can pass a fixed allowlist.
@@ -115,10 +129,21 @@ def build_app(
         clock=resolved_clock,
     )
 
-    # SMS dispatch is optional. When env vars are missing, the factory
-    # returns (None, None) and the Fire route 503s on channel=sms.
-    if sms_deps is None and sms_contexts is None:
-        sms_deps, sms_contexts = build_sms_deps(project_root=project_root)
+    # SMS is optional. If the caller didn't pass an explicit session +
+    # routing pair, try to build the live one from env vars. The
+    # factory returns ``(None, None)`` when required env vars are
+    # missing; the Fire route 503s on channel=sms in that state.
+    if sms_session is None and sms_routing is None:
+        sms_session, sms_routing = build_sms_session(
+            project_root=project_root,
+            case_repo=resolved_case_repo,
+            bus=resolved_bus,
+            clock=resolved_clock,
+        )
+
+    call_sessions: dict[Channel, CallSession] = {"voice": resolved_call_session}
+    if sms_session is not None:
+        call_sessions["sms"] = sms_session
 
     templates = Jinja2Templates(directory=str(package_templates_dir()))
     deps = RouteDeps(
@@ -128,8 +153,7 @@ def build_app(
         probe=resolved_probe,
         clock=resolved_clock,
         templates=templates,
-        sms_deps=sms_deps,
-        sms_contexts=sms_contexts,
+        enabled_channels=frozenset(call_sessions.keys()),
     )
 
     user_contexts = UserContextRegistry(
@@ -137,7 +161,7 @@ def build_app(
         user_registry=resolved_user_registry,
         case_repo=resolved_case_repo,
         trigger_source=resolved_trigger_source,
-        call_session=resolved_call_session,
+        call_sessions=call_sessions,
         bus=resolved_bus,
         clock=resolved_clock,
         retry_policy=retry_policy,
@@ -145,7 +169,7 @@ def build_app(
 
     app = FastAPI(
         title="Guidepoint Simulator",
-        version="0.4.0",
+        version="0.5.0",
         docs_url="/docs",
         redoc_url=None,
     )
@@ -155,9 +179,9 @@ def build_app(
     app.state.user_contexts = user_contexts
     app.state.user_registry = resolved_user_registry
 
-    # Browser-facing HTTP Basic Auth. No-ops unless BASIC_AUTH_USER +
-    # BASIC_AUTH_PASS are both set. Exempts /sms and /twilio/* so Twilio
-    # webhooks still work without credentials.
+    # Browser-facing HTTP Basic Auth. Auth is required whenever USERS
+    # is set (default: "demo:demo" for local dev). Exempts /sms and
+    # /twilio/* so Twilio webhooks still work without credentials.
     app.add_middleware(BasicAuthMiddleware)
     app.include_router(build_router(deps=deps))
     app.mount(
@@ -175,15 +199,15 @@ def build_app(
     app.mount("/twilio", sms_webhook_app, name="twilio")
     app.add_api_route("/sms", inbound_sms, methods=["POST"], name="twilio-inbound")
 
-    if sms_deps is not None and sms_contexts is not None:
+    if sms_session is not None and sms_routing is not None:
         register_inbound_handler(
-            _make_inbound_handler(deps=sms_deps, contexts=sms_contexts)
+            _make_inbound_handler(session=sms_session, routing=sms_routing)
         )
         _log.info("simulator.sms.handler.registered")
     else:
         _log.warning(
             "simulator.sms.handler.not_registered",
-            reason="sms_deps not configured (missing env vars?)",
+            reason="sms_session not configured (missing env vars?)",
         )
 
     _log.info(
@@ -196,39 +220,61 @@ def build_app(
 
 def _make_inbound_handler(
     *,
-    deps: SmsDeps,
-    contexts: SmsContextRegistry,
+    session: SmsCallSession,
+    routing: RoutingStore,
 ):
     """Build the coroutine sms.server calls for every inbound SMS.
 
-    Closes over the SMS deps + context registry so the webhook itself
-    stays a dumb pipe. Errors here are logged and swallowed so the
-    webhook still returns 200 to Twilio (Twilio retries on non-200s,
-    which would compound a transient failure).
+    Looks up ``phone -> case_id`` from the routing store, then asks
+    the SMS session to enqueue the turn onto the active conversation.
+    Errors are logged and swallowed so the webhook still returns 200
+    to Twilio (Twilio retries on non-200s, which would compound a
+    transient failure).
     """
 
     async def _handler(*, from_number: str, to_number: str, body: str, message_sid: str) -> None:
-        try:
-            await handle_inbound(
-                from_number=from_number,
-                body=body,
-                deps=deps,
-                context_lookup=contexts,
-                message_sid=message_sid,
-                to_number=to_number,
-            )
-        except InboundForUnknownPhoneError:
+        entry = routing.find_entry(from_number)
+        if entry is None:
             _log.warning(
                 "simulator.sms.inbound.unknown_phone",
                 phone=from_number,
                 body=body[:80],
             )
+            return
+        try:
+            queued = await session.deliver_inbound(
+                case_id=CaseId(entry.conversation_id),
+                from_number=from_number,
+                body=body,
+                message_sid=message_sid,
+            )
         except Exception as exc:
             _log.error(
                 "simulator.sms.inbound.failed",
                 phone=from_number,
+                case_id=entry.conversation_id,
+                user_id=entry.user_id,
                 error=f"{type(exc).__name__}: {exc}",
             )
+            return
+        if not queued:
+            # No active session for this case_id. Common after a
+            # process restart or once a case has reached terminal
+            # state and the customer keeps texting. Log + drop.
+            _log.info(
+                "simulator.sms.inbound.no_active_session",
+                phone=from_number,
+                case_id=entry.conversation_id,
+                user_id=entry.user_id,
+                body=body[:80],
+            )
+            return
+        _log.info(
+            "simulator.sms.inbound.queued",
+            phone=from_number,
+            case_id=entry.conversation_id,
+            user_id=entry.user_id,
+        )
 
     return _handler
 

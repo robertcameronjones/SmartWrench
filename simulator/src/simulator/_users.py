@@ -21,6 +21,7 @@ production** (the ``demo:demo`` default is logged loudly at startup).
 from __future__ import annotations
 
 import shutil
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Lock
@@ -33,6 +34,7 @@ from guidepoint.case import (
     CaseEvent,
     CaseManager,
     CaseRepository,
+    Channel,
     RetryPolicy,
     TriggerSource,
     build_default_case_manager,
@@ -140,12 +142,13 @@ class UserContext:
     """Per-user dependency bundle, cached for process lifetime.
 
     ``case_manager`` is per-user so customer / vehicle / dealer
-    lookups during ``fire()`` read from this user's master_data.
-    The underlying ``case_repo``, ``trigger_source``, and
-    ``call_session`` are global, so case files all land in the
-    shared cases/ dir where the live ElevenLabs callback can find
-    them. Per-user case filtering will land in a later commit via
-    a small ``case_owners.json`` manifest.
+    lookups during ``start()`` / ``fire()`` read from this user's
+    master_data. The underlying ``case_repo``, ``trigger_source``,
+    and ``call_sessions`` (voice + sms) are global, so case files
+    all land in the shared cases/ dir where the ElevenLabs voice
+    callback and the SMS inbound webhook can find them. Per-user
+    case filtering will land in a later commit via a small
+    ``case_owners.json`` manifest.
     """
 
     user: User
@@ -166,7 +169,7 @@ class UserContextRegistry:
         user_registry: UserRegistry,
         case_repo: CaseRepository,
         trigger_source: TriggerSource,
-        call_session: CallSession,
+        call_sessions: Mapping[Channel, CallSession],
         bus: EventBus[CaseEvent],
         clock: Clock,
         retry_policy: RetryPolicy | None,
@@ -176,7 +179,7 @@ class UserContextRegistry:
         self._user_registry = user_registry
         self._case_repo = case_repo
         self._trigger_source = trigger_source
-        self._call_session = call_session
+        self._call_sessions: dict[Channel, CallSession] = dict(call_sessions)
         self._bus = bus
         self._clock = clock
         self._retry_policy = retry_policy
@@ -207,7 +210,7 @@ class UserContextRegistry:
             master_data=master_data,
             case_repo=self._case_repo,
             trigger_source=self._trigger_source,
-            call_session=self._call_session,
+            call_sessions=self._call_sessions,
             bus=self._bus,
             clock=self._clock,
             retry_policy=self._retry_policy,

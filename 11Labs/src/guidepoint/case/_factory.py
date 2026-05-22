@@ -70,6 +70,8 @@ def create_case_from_trigger(
         vehicle=vehicle,
         service_event=trigger.service_event,
         offered_slots=trigger.offered_slots,
+        channel=trigger.channel_preference,
+        user_id=trigger.user_id,
         state=CaseState.CREATED,
         attempt_count=0,
         next_attempt_at=None,

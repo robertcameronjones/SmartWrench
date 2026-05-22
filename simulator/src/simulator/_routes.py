@@ -12,9 +12,9 @@ reads the validated user id off ``request.state.user_id`` (set by
 :class:`BasicAuthMiddleware`) and returns a cached
 :class:`UserContext` for that user.
 
-Truly global state (event bus, connection probe, system clock, the
-shared SMS adapter, templates) is held in :class:`RouteDeps`, captured
-once at app build time.
+Truly global state (event bus, connection probe, system clock,
+templates) is held in :class:`RouteDeps`, captured once at app build
+time.
 
 Per the operator's mental model (2026-05-10):
 
@@ -24,8 +24,10 @@ Per the operator's mental model (2026-05-10):
   service type + summary and presses Fire. The trigger is synthesized
   on the server from the saved master data + the form input. It has
   no durable existence and no picker.
-- All ElevenLabs traffic flows through ``CaseManager.fire``. The route
-  layer never imports ``CallSession``.
+- Every Fire goes through ``CaseManager.start`` regardless of channel.
+  The manager picks the right ``CallSession`` (voice → ElevenLabs,
+  sms → ``SmsCallSession``) by ``trigger.channel_preference``. The
+  route layer never imports any ``CallSession`` directly.
 """
 
 from __future__ import annotations
@@ -69,7 +71,6 @@ from guidepoint.master_data import (
     VehicleRecord,
     VehicleVin,
 )
-from sms_adapter import SmsContext, SmsDeps, open_conversation
 
 from simulator._connection import ConnectionProbe
 from simulator._models import (
@@ -79,7 +80,6 @@ from simulator._models import (
     FireResponse,
     MasterDataSnapshot,
 )
-from simulator._sms_context_registry import SmsContextRegistry
 from simulator._users import UserContext, get_user_context
 
 _log = structlog.get_logger(__name__)
@@ -91,10 +91,10 @@ class RouteDeps:
     """Global dependencies for the route layer.
 
     Per-user master data + slots are pulled per-request via
-    ``Depends(get_user_context)``. Cases stay global for now (Commit
-    1) so the live ``CallSession`` keeps writing to a single
-    ``case_repo``; per-user case filtering will land in the next
-    commit via an ownership manifest.
+    ``Depends(get_user_context)``. The case repo, trigger source,
+    and call sessions are global — the per-user ``CaseManager``
+    inside ``UserContext`` is wired against them but reuses the
+    singleton instances built in ``build_app``.
     """
 
     case_repo: CaseRepository
@@ -103,11 +103,10 @@ class RouteDeps:
     probe: ConnectionProbe
     clock: Clock
     templates: Jinja2Templates
-    # SMS dispatch — None means SMS dispatch isn't configured (env vars
-    # missing). The Fire route surfaces a 503 if channel=sms but sms_deps
-    # is None, so voice still works regardless.
-    sms_deps: SmsDeps | None = None
-    sms_contexts: SmsContextRegistry | None = None
+    # Set of channels the manager actually has a CallSession for. Used
+    # by the Fire route to 503 cleanly when an operator picks a channel
+    # that isn't wired (typically SMS when its env vars are missing).
+    enabled_channels: frozenset[str] = frozenset({"voice"})
 
 
 def build_router(*, deps: RouteDeps) -> APIRouter:
@@ -352,12 +351,18 @@ def _connection(deps: RouteDeps) -> Callable[[], ConnectionStatus]:
 def _fire(
     deps: RouteDeps,
 ) -> Callable[..., Coroutine[Any, Any, FireResponse]]:
-    """Synthesize a trigger from saved master data + the form, then fire.
+    """Synthesize a trigger from saved master data + the form, then start the case.
 
     The browser sends only ``service_type`` + ``service_summary`` (+
-    optional ``narrative``). Everything else — which customer, which
-    vehicle, which dealer, which slots — comes from the saved fixtures
-    in the operator's user namespace.
+    optional ``narrative``) and ``channel``. Everything else — which
+    customer, which vehicle, which dealer, which slots — comes from
+    the saved fixtures in the operator's user namespace.
+
+    Both voice and SMS go through ``case_manager.start(trigger)``;
+    the manager picks the channel's ``CallSession`` from the trigger
+    and spawns the call attempt as a background task. We return the
+    case in ``state=CALLING``; terminal transitions stream to the UI
+    via the ``/ws/log`` WebSocket.
     """
 
     async def handler(
@@ -380,14 +385,21 @@ def _fire(
         except (CustomerNotFoundError, DealerNotFoundError, VehicleNotFoundError) as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
-        if request.channel == "sms":
-            return await _fire_sms(
-                deps=deps,
-                ctx=ctx,
-                customer=customer,
-                dealer=dealer,
-                vehicle=vehicle,
-                request=request,
+        if request.channel not in deps.enabled_channels:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    f"channel {request.channel!r} is not configured on this "
+                    f"deployment (enabled: {sorted(deps.enabled_channels)}). "
+                    "For SMS, set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, "
+                    "TWILIO_FROM_NUMBER and restart."
+                ),
+            )
+
+        if request.channel == "sms" and not customer.phone:
+            raise HTTPException(
+                status_code=409,
+                detail=f"customer {customer.id!r} has no phone number; cannot send SMS",
             )
 
         trigger = Trigger(
@@ -399,21 +411,22 @@ def _fire(
                 summary=request.service_summary,
                 narrative=request.narrative,
             ),
-            channel_preference="voice",
+            channel_preference=request.channel,
             offered_slots=ctx.slots_repo.list(),
             source="operator",
             status="pending",
             created_at=deps.clock.now(),
+            user_id=ctx.user.id,
         )
-        # Register the synthesized trigger so CaseManager.mark_fired/_failed
-        # have something to update. The ephemeral source no-ops if it isn't
-        # registered. The trigger_source is global (single in-memory dict)
+        # Register the synthesized trigger so CaseManager.mark_fired /
+        # mark_failed have something to update. The ephemeral source
+        # no-ops if it isn't registered. The trigger_source is global
         # but each user's CaseManager carries its own master_data so
         # customer/vehicle/dealer lookups hit the right namespace.
         deps.trigger_source.save(trigger)
 
         try:
-            case = await ctx.case_manager.fire(trigger)
+            case = await ctx.case_manager.start(trigger)
         except (CaseError, MasterDataError) as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
@@ -424,7 +437,7 @@ def _fire(
             case_id=case.case_id,
             correlation_id=case.correlation_id,
             customer_id=customer.id,
-            channel="voice",
+            channel=request.channel,
         )
         return FireResponse(
             case_id=case.case_id,
@@ -433,166 +446,6 @@ def _fire(
         )
 
     return handler
-
-
-async def _fire_sms(
-    *,
-    deps: RouteDeps,
-    ctx: UserContext,
-    customer: CustomerRecord,
-    dealer: DealerRecord,
-    vehicle: VehicleRecord,
-    request: FireRequest,
-) -> FireResponse:
-    """SMS arm of the Fire handler.
-
-    Builds an :class:`SmsContext` from the user's saved master data,
-    registers it with the shared in-memory context registry so inbound
-    replies can recover the variables, then asks
-    ``sms_adapter.open_conversation`` to send the opening message.
-
-    NOTE (Phase 1): the SMS adapter is still a single shared instance
-    across users — history, routing, and context registry are global.
-    Inbound routing today goes by phone number, so two users firing
-    against different customers/phones work independently. Two users
-    firing to the same phone follow the "replace prior conversation"
-    rule below.
-    """
-    if deps.sms_deps is None or deps.sms_contexts is None:
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                "SMS dispatch not configured. Set TWILIO_ACCOUNT_SID, "
-                "TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER, LLM_MODEL in .env "
-                "and restart the simulator."
-            ),
-        )
-
-    if not customer.phone:
-        raise HTTPException(
-            status_code=409,
-            detail=f"customer {customer.id!r} has no phone number; cannot send SMS",
-        )
-
-    conversation_id = f"sms_{secrets.token_hex(6)}"
-    correlation_id = f"corr_{secrets.token_hex(6)}"
-    variables = _build_sms_variables(
-        customer=customer,
-        dealer=dealer,
-        vehicle=vehicle,
-        slots=ctx.slots_repo.list(),
-        channel=request.channel,
-        service_type=request.service_type,
-        service_summary=request.service_summary,
-        service_narrative=request.narrative,
-        conversation_id=conversation_id,
-    )
-
-    sms_ctx = SmsContext(
-        conversation_id=conversation_id,
-        customer_phone=customer.phone,
-        variables=variables,
-    )
-
-    # Pressing Fire in the simulator means "start a new conversation
-    # against this phone, replacing any prior one." History for prior
-    # conversations stays on disk under their old conversation_ids; we
-    # just drop the routing binding so this phone now points at the
-    # new conversation. Without this, the second Fire press always
-    # 502s with "phone already bound."
-    prior_conversation_id = deps.sms_deps.routing.find_conversation_id(customer.phone)
-    if prior_conversation_id is not None and prior_conversation_id != conversation_id:
-        deps.sms_deps.routing.unbind(phone=customer.phone)
-        deps.sms_contexts.forget(prior_conversation_id)
-        _log.info(
-            "simulator.fire.sms.replaced_prior_conversation",
-            phone=customer.phone,
-            prior_conversation_id=prior_conversation_id,
-            new_conversation_id=conversation_id,
-        )
-
-    deps.sms_contexts.register(sms_ctx)
-
-    try:
-        opening = await open_conversation(sms_ctx, deps=deps.sms_deps)
-    except Exception as exc:
-        deps.sms_contexts.forget(conversation_id)
-        deps.sms_deps.routing.unbind(phone=customer.phone)
-        raise HTTPException(
-            status_code=502,
-            detail=f"SMS open failed: {type(exc).__name__}: {exc}",
-        ) from exc
-
-    _log.info(
-        "simulator.fire.accepted",
-        user_id=ctx.user.id,
-        conversation_id=conversation_id,
-        correlation_id=correlation_id,
-        customer_id=customer.id,
-        phone=customer.phone,
-        channel="sms",
-        opening_chars=len(opening),
-    )
-    return FireResponse(
-        case_id=conversation_id,
-        correlation_id=correlation_id,
-        accepted_at=datetime.now(UTC),
-    )
-
-
-def _build_sms_variables(
-    *,
-    customer: CustomerRecord,
-    dealer: DealerRecord,
-    vehicle: VehicleRecord,
-    slots: Iterable[OfferedSlot],
-    channel: str,
-    service_type: str,
-    service_summary: str,
-    service_narrative: str,
-    conversation_id: str,
-) -> dict[str, str]:
-    """Flatten master data + form into the variables dict the prompt
-    composer substitutes.
-
-    Mirrors ``Case.to_variables()`` for the keys the system prompt
-    actually references. If a placeholder is present in
-    ``system-prompt.md`` or ``sms.md`` that we don't supply here, the
-    composer raises ``MissingPlaceholderError`` and the Fire route
-    surfaces it as a 502 — that's the contract.
-    """
-    slots_tuple = tuple(slots)
-    return {
-        "channel": channel,
-        "case_id": conversation_id,
-        "trigger_id": conversation_id,
-        "customer_id": customer.id,
-        "customer_first_name": customer.first_name,
-        "customer_last_name": customer.last_name,
-        "customer_full_name": customer.full_name,
-        "customer_phone": customer.phone,
-        "customer_opt_status": customer.opt_status,
-        "customer_preferred_channel": customer.preferred_channel,
-        "customer_timezone": customer.timezone,
-        "dealer_id": dealer.id,
-        "dealer_name": dealer.name,
-        "dealer_phone": dealer.phone,
-        "dealer_address": dealer.address,
-        "ride_radius_miles": str(dealer.ride_radius_miles),
-        "vehicle_year": str(vehicle.year),
-        "vehicle_make": vehicle.make,
-        "vehicle_model": vehicle.model,
-        "vehicle_vin": vehicle.vin,
-        "vehicle_odometer_miles": str(vehicle.odometer_miles),
-        "vehicle_location_lat": f"{vehicle.current_location.latitude:.6f}",
-        "vehicle_location_lon": f"{vehicle.current_location.longitude:.6f}",
-        "vehicle_location_description": vehicle.current_location.description,
-        "service_reason_type": service_type,
-        "service_reason_summary": service_summary,
-        "service_reason_narrative": service_narrative,
-        "slot_count": str(len(slots_tuple)),
-        "slot_options": "; ".join(s.display for s in slots_tuple),
-    }
 
 
 def _log_socket(deps: RouteDeps) -> Callable[[WebSocket], Coroutine[Any, Any, None]]:

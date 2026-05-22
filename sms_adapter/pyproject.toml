@@ -13,6 +13,8 @@ dependencies = [
   "prompt_composer",
   "sms",
   "llm",
+  "guidepoint",
+  "structlog>=24.1",
 ]
 
 [project.optional-dependencies]
