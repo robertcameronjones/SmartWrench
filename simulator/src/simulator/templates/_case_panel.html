@@ -1,0 +1,54 @@
+<section class="panel controls-panel" id="case-controls-panel" hidden>
+  <div class="panel-head">
+    <h2>Case controls</h2>
+    <span class="badge badge-optout" id="optout-badge" hidden>SMS opted out</span>
+  </div>
+
+  <p class="hint controls-hint">
+    World gates and lifecycle shortcuts for the active case. Buttons appear
+    as the case reaches each stage.
+  </p>
+
+  <div class="controls-grid">
+    <div class="controls-block">
+      <div class="controls-label">Business hours</div>
+      <div class="seg" id="seg-business-hours" role="group" aria-label="Business hours">
+        <button type="button" class="seg-btn is-active" data-world="business-hours" data-value="open">Open</button>
+        <button type="button" class="seg-btn" data-world="business-hours" data-value="closed">Closed</button>
+      </div>
+    </div>
+
+    <div class="controls-block">
+      <div class="controls-label">Vehicle at dealer</div>
+      <div class="seg" id="seg-geofence" role="group" aria-label="Geofence">
+        <button type="button" class="seg-btn is-active" data-world="geofence" data-value="away">Away</button>
+        <button type="button" class="seg-btn" data-world="geofence" data-value="at_dealer">At dealer</button>
+      </div>
+    </div>
+
+    <div class="controls-block">
+      <div class="controls-label">Initial reminder (T-24h)</div>
+      <div class="seg" id="seg-initial-reminder" role="group" aria-label="Initial reminder">
+        <button type="button" class="seg-btn is-active" data-time="initial-reminder" data-value="before">Before</button>
+        <button type="button" class="seg-btn" data-time="initial-reminder" data-value="due">Due</button>
+      </div>
+    </div>
+
+    <div class="controls-block">
+      <div class="controls-label">Final reminder (day of)</div>
+      <div class="seg" id="seg-final-reminder" role="group" aria-label="Final reminder">
+        <button type="button" class="seg-btn is-active" data-time="final-reminder" data-value="before">Before</button>
+        <button type="button" class="seg-btn" data-time="final-reminder" data-value="due">Due</button>
+      </div>
+    </div>
+
+    <div class="controls-block">
+      <div class="controls-label">End of business day</div>
+      <div class="event-buttons" id="event-buttons">
+        <button type="button" class="btn event-btn" data-signal="end_of_business_day_reached" disabled>
+          Reached
+        </button>
+      </div>
+    </div>
+  </div>
+</section>

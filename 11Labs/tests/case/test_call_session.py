@@ -179,6 +179,7 @@ async def test_place_returns_booked_outcome_on_done_with_scheduled_fields(
     assert outcome.result == "answered"
     assert outcome.business_outcome == "booked"
     assert outcome.booked_slot_id == "slot_chosen_20260512_0830"
+    assert outcome.booked_slot_display == "05/12/2026 at 8:30 AM"
     assert outcome.elevenlabs_conversation_id == "conv_real"
     assert "Kate: Hi Robert." in outcome.transcript
     assert "Customer: Tuesday works." in outcome.transcript

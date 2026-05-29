@@ -44,9 +44,11 @@ class TestStateTransitions:
     def test_update_state(self, tmp_path: Path) -> None:
         repo = build_json_case_repository(paths=JsonCasePaths.for_root(tmp_path))
         repo.save(sample_case())
-        updated = repo.update_state(CaseId("case_1"), new_state=CaseState.CALLING)
-        assert updated.state == CaseState.CALLING
-        assert repo.get(CaseId("case_1")).state == CaseState.CALLING
+        updated = repo.update_state(
+            CaseId("case_1"), new_state=CaseState.CONTACTING_CUSTOMER
+        )
+        assert updated.state == CaseState.CONTACTING_CUSTOMER
+        assert repo.get(CaseId("case_1")).state == CaseState.CONTACTING_CUSTOMER
 
     def test_update_outcome(self, tmp_path: Path) -> None:
         repo = build_json_case_repository(paths=JsonCasePaths.for_root(tmp_path))
@@ -57,10 +59,12 @@ class TestStateTransitions:
             new_state=CaseState.BOOKED,
             outcome_detail="booked slot_a",
             booked_slot_id=SlotId("slot_a"),
+            booked_slot_display="Tuesday, May 12, 2026 - 8:30 AM",
             closed_at=closed,
         )
         assert updated.state == CaseState.BOOKED
         assert updated.booked_slot_id == "slot_a"
+        assert updated.booked_slot_display == "Tuesday, May 12, 2026 - 8:30 AM"
         assert updated.closed_at == closed
 
 

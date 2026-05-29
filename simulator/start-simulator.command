@@ -79,7 +79,7 @@ if [ -z "$PUBLIC_URL" ]; then
   echo "[ngrok] WARNING: no public URL available; check $NGROK_LOG"
 else
   echo "[ngrok] public URL: $PUBLIC_URL"
-  echo "[ngrok] Twilio webhook should be: $PUBLIC_URL/sms-webhook/sms"
+  echo "[ngrok] Twilio webhook should be: $PUBLIC_URL/sms"
 fi
 
 # Only kill ngrok on exit if WE spawned it. A pre-existing tunnel keeps

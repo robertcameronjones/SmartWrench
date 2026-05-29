@@ -32,7 +32,6 @@ Per the operator's mental model (2026-05-10):
 
 from __future__ import annotations
 
-import os
 import secrets
 from collections.abc import Callable, Coroutine, Iterable
 from dataclasses import dataclass
@@ -80,7 +79,9 @@ from simulator._models import (
     FireResponse,
     MasterDataSnapshot,
 )
+from simulator._sim_controls import ensure_geofence_subscription
 from simulator._users import UserContext, get_user_context
+from sms_adapter import SmsConsentChecker
 
 _log = structlog.get_logger(__name__)
 
@@ -107,6 +108,8 @@ class RouteDeps:
     # by the Fire route to 503 cleanly when an operator picks a channel
     # that isn't wired (typically SMS when its env vars are missing).
     enabled_channels: frozenset[str] = frozenset({"voice"})
+    # Same checker wired into outbound SMS (GatedTwilioSend) and Fire.
+    sms_consent_checker: SmsConsentChecker | None = None
 
 
 def build_router(*, deps: RouteDeps) -> APIRouter:
@@ -184,7 +187,6 @@ def _index(deps: RouteDeps) -> Callable[[Request], Coroutine[Any, Any, HTMLRespo
             request=request,
             name="index.html",
             context={
-                "deployment_label": os.environ.get("DEPLOYMENT_LABEL", "").strip(),
                 "user_id": getattr(request.state, "user_id", ""),
             },
         )
@@ -358,14 +360,14 @@ def _fire(
     customer, which vehicle, which dealer, which slots — comes from
     the saved fixtures in the operator's user namespace.
 
-    Both voice and SMS go through ``case_manager.start(trigger)``;
-    the manager picks the channel's ``CallSession`` from the trigger
-    and spawns the call attempt as a background task. We return the
-    case in ``state=CALLING``; terminal transitions stream to the UI
-    via the ``/ws/log`` WebSocket.
+    Both voice and SMS go through ``CaseDriver.fire()`` so the v2
+    lifecycle (outreach → dealer confirm → reminder → day-of) runs in
+    the simulator. Returns immediately; state transitions stream to
+    the UI via the ``/ws/log`` WebSocket and ``GET /api/cases/{id}``.
     """
 
     async def handler(
+        http_request: Request,
         request: FireRequest,
         ctx: UserContext = Depends(get_user_context),
     ) -> FireResponse:
@@ -402,6 +404,18 @@ def _fire(
                 detail=f"customer {customer.id!r} has no phone number; cannot send SMS",
             )
 
+        if request.channel == "sms":
+            checker = deps.sms_consent_checker
+            allowed = checker.sms_consent_for_phone(customer.phone) if checker else customer.sms_consent
+            if not allowed:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"customer {customer.id!r} has opted out of SMS "
+                        f"(opt_status={customer.opt_status!r})"
+                    ),
+                )
+
         trigger = Trigger(
             id=TriggerId(f"trig_{secrets.token_hex(6)}"),
             vehicle_vin=vehicle.vin,
@@ -425,10 +439,31 @@ def _fire(
         # customer/vehicle/dealer lookups hit the right namespace.
         deps.trigger_source.save(trigger)
 
+        case_driver = http_request.app.state.case_driver
+        geofence_port = http_request.app.state.geofence_port
+        geofence_forwarder = http_request.app.state.geofence_forwarder
+        subscribed: set = http_request.app.state.geofence_subscribed
+
         try:
-            case = await ctx.case_manager.start(trigger)
+            case_id = await case_driver.fire(
+                trigger=trigger,
+                customer=customer,
+                dealer=dealer,
+                vehicle=vehicle,
+            )
+            case = deps.case_repo.get(case_id)
         except (CaseError, MasterDataError) as exc:
+            deps.trigger_source.mark_failed(trigger.id, error_detail=str(exc))
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+        deps.trigger_source.mark_fired(trigger.id, case_id=case.case_id)
+        http_request.app.state.active_vehicle_vin = str(vehicle.vin)
+        ensure_geofence_subscription(
+            geofence_port=geofence_port,
+            vehicle_vin=vehicle.vin,
+            on_event=geofence_forwarder,
+            subscribed=subscribed,
+        )
 
         _log.info(
             "simulator.fire.accepted",

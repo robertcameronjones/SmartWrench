@@ -27,12 +27,12 @@ the underlying customer record has since been edited.
 
 from __future__ import annotations
 
-from datetime import datetime
 from enum import StrEnum
-from typing import Literal, NewType, final
+from typing import Any, Literal, NewType, final
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from guidepoint.clock import UtcDatetime
 from guidepoint.master_data import (
     CustomerRecord,
     DealerId,
@@ -94,8 +94,47 @@ class OfferedSlot(BaseModel):
     model_config = _frozen_strict()
 
     id: SlotId
-    starts_at: datetime
+    starts_at: UtcDatetime
     display: str = Field(min_length=1)
+
+
+def lookup_slot_display(
+    *,
+    offered_slots: tuple[OfferedSlot, ...],
+    slot_id: SlotId | None,
+) -> str:
+    """Return the customer-facing appointment label for ``slot_id``.
+
+    Internal ids like ``slot_a`` are for the state machine and dealer
+    port; prompts and the LLM should use this human-readable string
+    (``OfferedSlot.display``) instead.
+    """
+
+    if slot_id is None:
+        return ""
+    for slot in offered_slots:
+        if slot.id == slot_id:
+            return slot.display
+    return ""
+
+
+def _summarize_last_event(events: tuple["CaseEvent", ...]) -> str:
+    """Return a short ``"<event> @ <isoZ>: <detail>"`` for the most
+    recent event, or ``""`` if none. Surfaced to the LLM via
+    ``Case.to_variables()`` so Kate has explicit context about the
+    state machine's last action without us replaying full history.
+    """
+
+    if not events:
+        return ""
+    last = events[-1]
+    ts = last.timestamp.strftime("%Y-%m-%dT%H:%M:%SZ")
+    detail = last.detail.strip().replace("\n", " ")
+    if len(detail) > 120:
+        detail = detail[:119] + "\u2026"
+    if detail:
+        return f"{last.event} @ {ts}: {detail}"
+    return f"{last.event} @ {ts}"
 
 
 # ---------------------------------------------------------------------------
@@ -127,8 +166,8 @@ class Trigger(BaseModel):
     offered_slots: tuple[OfferedSlot, ...] = ()
     source: TriggerSourceKind = "operator"
     status: TriggerStatus = "pending"
-    created_at: datetime
-    fired_at: datetime | None = None
+    created_at: UtcDatetime
+    fired_at: UtcDatetime | None = None
     error_detail: str = ""
     # Operator who fired this trigger (auth username today). Empty
     # string when no operator identity is available (e.g. monitor task
@@ -146,19 +185,45 @@ class Trigger(BaseModel):
 class CaseState(StrEnum):
     """Where a case is in its business lifecycle.
 
-    Five non-terminal states (top of enum) and four terminal (bottom).
-    Only ``CaseManager`` writes to ``Case.state``.
+    V2 full-lifecycle enum: trigger → outreach → dealer confirmation →
+    booking → initial reminder → final reminder → service event →
+    feedback → closed.
+
+    The case-state machine is owned exclusively by ``CaseManager`` (the
+    v1 manager loop today; the v2 ``CaseDriver`` + pure reducer after
+    Phase 3/4). Channel-internal lifecycle (dial, opened, conversing)
+    lives inside each ``CallManager`` and never appears here.
+
+    Reminder stages are split into ``*_DUE`` (timer armed, nothing sent
+    yet) and ``*_SENT`` (Kate has fired the message, awaiting customer
+    reply / geofence / EoD). Symmetric across initial (T-24h) and final
+    (day-of) so the four customer outcomes — confirm, reschedule,
+    cancel, no response — land in the same place at both touchpoints.
     """
 
+    # Non-terminal lifecycle states.
     CREATED = "created"
-    READY_TO_CALL = "ready_to_call"
-    CALLING = "calling"
-    BETWEEN_ATTEMPTS = "between_attempts"
+    CONTACTING_CUSTOMER = "contacting_customer"
+    SLOT_PROPOSED = "slot_proposed"
+    SLOT_PICKED = "slot_picked"
+    CONFIRMING_WITH_DEALER = "confirming_with_dealer"
+    INITIAL_REMINDER_DUE = "initial_reminder_due"
+    INITIAL_REMINDER_SENT = "initial_reminder_sent"
+    RESCHEDULING = "rescheduling"
+    FINAL_REMINDER_DUE = "final_reminder_due"
+    FINAL_REMINDER_SENT = "final_reminder_sent"
+    SHOWED = "showed"
+    AWAITING_FEEDBACK = "awaiting_feedback"
+
+    # Terminal states (case closed).
     BOOKED = "booked"
     DECLINED = "declined"
-    UNREACHABLE = "unreachable"
-    ESCALATED = "escalated"
     CANCELLED = "cancelled"
+    ABANDONED = "abandoned"
+    NO_SHOW = "no_show"
+    RESCHEDULE_FAILED = "reschedule_failed"
+    OPTED_OUT = "opted_out"
+    COMPLETED = "completed"
 
     @property
     def is_terminal(self) -> bool:
@@ -170,11 +235,40 @@ _TERMINAL_CASE_STATES: frozenset[CaseState] = frozenset(
     {
         CaseState.BOOKED,
         CaseState.DECLINED,
-        CaseState.UNREACHABLE,
-        CaseState.ESCALATED,
         CaseState.CANCELLED,
+        CaseState.ABANDONED,
+        CaseState.NO_SHOW,
+        CaseState.RESCHEDULE_FAILED,
+        CaseState.OPTED_OUT,
+        CaseState.COMPLETED,
     }
 )
+
+
+# Legacy state values mapped to their current equivalents. Applied by the
+# ``Case`` model validator so older persisted cases still load.
+#
+# v1 outreach: READY_TO_CALL / CALLING / BETWEEN_ATTEMPTS all collapse
+# into CONTACTING_CUSTOMER (the active-outreach state). UNREACHABLE and
+# ESCALATED both meant "we gave up reaching the customer" — that's
+# ABANDONED in v2's vocabulary.
+#
+# v2 post-booking: the original four reminder states (awaiting_reminder,
+# reminded, confirmed, day_of) conflated "timer armed" with "message
+# sent". They are renamed to the symmetric *_DUE / *_SENT pair so each
+# touchpoint has the same four customer outcomes (confirm / reschedule /
+# cancel / no response).
+_LEGACY_STATE_MIGRATIONS: dict[str, str] = {
+    "ready_to_call": "contacting_customer",
+    "calling": "contacting_customer",
+    "between_attempts": "contacting_customer",
+    "unreachable": "abandoned",
+    "escalated": "abandoned",
+    "awaiting_reminder": "initial_reminder_due",
+    "reminded": "initial_reminder_sent",
+    "confirmed": "final_reminder_due",
+    "day_of": "final_reminder_sent",
+}
 
 
 class CallState(StrEnum):
@@ -196,7 +290,51 @@ class CallState(StrEnum):
 # ---------------------------------------------------------------------------
 
 CallResult = Literal["answered", "no_answer", "busy", "connection_failed", "error"]
-BusinessOutcome = Literal["booked", "declined", "transferred", "inconclusive"]
+
+# v2 BusinessOutcome — what one call produced at the *business* layer.
+#
+# Decided values (customer made a choice that closes or advances the case):
+#   - booked        — outreach: customer accepted, slot picked
+#   - declined      — outreach: customer declined service
+#   - confirmed     — reminder: customer reconfirmed existing booking
+#   - rescheduled   — reminder: customer wants a new slot (drives RESCHEDULING)
+#   - cancelled     — reminder: customer cancelled the booking
+#   - feedback      — feedback: customer left feedback (or explicit decline)
+#   - opted_out     — any stage: STOP keyword detected (SMS) / explicit opt-out (voice)
+#
+# Incomplete value (call ended with no business decision; reducer applies
+# the one-retry, then yield policy):
+#   - inconclusive  — no decision reached this call
+#
+# Deprecated v1 value retained for legacy JSON readback (mapped to ABANDONED
+# by the v1 manager loop; never emitted by v2 CallManagers):
+#   - transferred
+BusinessOutcome = Literal[
+    "booked",
+    "declined",
+    "confirmed",
+    "rescheduled",
+    "cancelled",
+    "feedback",
+    "opted_out",
+    "inconclusive",
+    "transferred",
+]
+
+# Set of business outcomes that count as "Decided" per the v2 retry policy.
+# Everything else (None / "inconclusive" / connection-level failure) is
+# "Incomplete" and the reducer applies the one-retry, then yield rule.
+DECIDED_OUTCOMES: frozenset[str] = frozenset(
+    {
+        "booked",
+        "declined",
+        "confirmed",
+        "rescheduled",
+        "cancelled",
+        "feedback",
+        "opted_out",
+    }
+)
 
 
 class CallOutcome(BaseModel):
@@ -212,13 +350,28 @@ class CallOutcome(BaseModel):
     result: CallResult
     business_outcome: BusinessOutcome | None = None
     booked_slot_id: SlotId | None = None
+    booked_slot_display: str = ""
     elevenlabs_conversation_id: str = ""
-    started_at: datetime
-    ended_at: datetime
+    started_at: UtcDatetime
+    ended_at: UtcDatetime
     duration_seconds: float = Field(ge=0.0)
     transcript: str = ""
     recording_url: str = ""
     error_detail: str = ""
+
+    @property
+    def is_decided(self) -> bool:
+        """``True`` when this call produced a customer decision.
+
+        The v2 retry policy uses this: ``Decided`` outcomes advance the
+        case (book / decline / confirm / reschedule / cancel / feedback /
+        opt-out). Anything else (``False``) is ``Incomplete`` and the
+        reducer applies one retry, then yields.
+        """
+        return (
+            self.business_outcome is not None
+            and self.business_outcome in DECIDED_OUTCOMES
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -280,12 +433,13 @@ class PostCallReport(BaseModel):
 
     elevenlabs_conversation_id: str = Field(min_length=1)
     status: PostCallStatus
-    started_at: datetime
-    ended_at: datetime
+    started_at: UtcDatetime
+    ended_at: UtcDatetime
     duration_seconds: float = Field(ge=0.0)
     transcript: tuple[TranscriptTurn, ...] = ()
     business_outcome: BusinessOutcome = "inconclusive"
     booked_slot_id: SlotId | None = None
+    booked_slot_display: str = ""
     recording_url: str = ""
     error_detail: str = ""
 
@@ -295,7 +449,18 @@ class PostCallReport(BaseModel):
 # ---------------------------------------------------------------------------
 
 EventLevel = Literal["info", "warn", "error", "debug"]
-EventSource = Literal["system", "elevenlabs", "sms", "tool_webhook", "operator"]
+EventSource = Literal[
+    "system",
+    "elevenlabs",
+    "sms",
+    "tool_webhook",
+    "operator",
+    # v2 case-signal sources — added in Phase 2 alongside CaseSignal.
+    "geofence",  # vehicle entered/exited dealer
+    "dealer",  # dealer slot port responses
+    "clock",  # scheduled timers (reminder, day-of, EoD)
+    "world",  # global gates (business hours)
+]
 
 
 class CaseEvent(BaseModel):
@@ -312,7 +477,7 @@ class CaseEvent(BaseModel):
     case_id: CaseId
     correlation_id: str = Field(min_length=1)
     attempt_number: int | None = None
-    timestamp: datetime
+    timestamp: UtcDatetime
     source: EventSource = "system"
     level: EventLevel = "info"
     event: str = Field(min_length=1)
@@ -351,13 +516,14 @@ class Case(BaseModel):
     service_event: ServiceEvent
     offered_slots: tuple[OfferedSlot, ...] = ()
 
-    # Channel the case is being run on. Snapshotted from
-    # ``Trigger.channel_preference`` at fire time so the manager can
-    # route to the right ``CallSession`` and the prompt composer can
-    # render channel-specific addenda without re-reading the trigger.
-    # Defaults to ``"voice"`` for backward-compat with case JSON files
-    # written before this field existed.
-    channel: Channel = "voice"
+    # Channel the case's **initial outreach** was made on. Snapshotted
+    # from ``Trigger.channel_preference`` at fire time. Downstream
+    # stages (reminder, day-of, feedback) always use SMS regardless of
+    # this value — see the v2 lifecycle doc. Renamed from ``channel``
+    # in v2 to make the per-stage channel semantics explicit; the model
+    # validator below accepts the legacy ``channel`` field for
+    # backward-compat with v1 JSON cases.
+    initial_channel: Channel = "voice"
 
     # Operator who fired the trigger that created this case. Empty
     # string when no operator identity exists (production monitor task)
@@ -369,7 +535,22 @@ class Case(BaseModel):
     # State machine.
     state: CaseState = CaseState.CREATED
     attempt_count: int = Field(ge=0, default=0)
-    next_attempt_at: datetime | None = None
+    next_attempt_at: UtcDatetime | None = None
+
+    # Count of reschedule attempts consumed at the reminder stage.
+    # Policy is one-shot: ``reschedule_count >= 1`` plus a failed
+    # second swing yields the ``RESCHEDULE_FAILED`` terminal. Set by
+    # the Phase 3 reducer; defaults to zero for v1 cases that predate
+    # the field.
+    reschedule_count: int = Field(ge=0, default=0)
+
+    # Short, human-readable notes captured by the OUTREACH CallManager
+    # at end of call (e.g. "customer prefers mornings; mentioned
+    # they're traveling next week"). The post-booking SMS prompt
+    # exposes this as a dynamic variable so reminder / day-of /
+    # feedback conversations feel continuous with the original
+    # outreach. Cap at ~200 chars to keep the prompt focused.
+    context_notes: str = Field(default="", max_length=200)
 
     # History.
     call_attempts: tuple[CallAttempt, ...] = ()
@@ -378,10 +559,43 @@ class Case(BaseModel):
     # Outcome (only set in terminal states).
     outcome_detail: str = ""
     booked_slot_id: SlotId | None = None
+    # Customer-facing appointment time (e.g. "Tuesday, May 12, 2026 -
+    # 8:30 AM"). Set when the customer picks a slot; fed to post-
+    # booking prompts via ``to_variables()`` as ``booked_slot_display``.
+    # Not the internal ``SlotId`` — the LLM never sees ``slot_a``.
+    booked_slot_display: str = ""
 
     # Timestamps.
-    created_at: datetime
-    closed_at: datetime | None = None
+    created_at: UtcDatetime
+    closed_at: UtcDatetime | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_legacy_fields(cls, values: Any) -> Any:
+        """Accept v1-shaped JSON: legacy ``channel`` field and old states.
+
+        The case fixtures and any persisted case JSON files written
+        under v1 use ``channel`` as the field name and may carry state
+        values that were retired in v2 (``ready_to_call``, ``calling``,
+        ``between_attempts``, ``unreachable``, ``escalated``). This
+        validator normalizes them into the v2 shape before pydantic's
+        type validation runs, so downstream code only ever sees v2
+        field names and v2 state values.
+
+        Skips silently for non-dict inputs (e.g. ``Case.model_validate``
+        passing through an existing instance).
+        """
+        if not isinstance(values, dict):
+            return values
+
+        if "channel" in values and "initial_channel" not in values:
+            values["initial_channel"] = values.pop("channel")
+
+        raw_state = values.get("state")
+        if isinstance(raw_state, str) and raw_state in _LEGACY_STATE_MIGRATIONS:
+            values["state"] = _LEGACY_STATE_MIGRATIONS[raw_state]
+
+        return values
 
     def to_variables(self) -> dict[str, str]:
         """Flatten the case snapshot into the dict ElevenLabs receives.
@@ -391,7 +605,7 @@ class Case(BaseModel):
         ``Case.variable_keys()`` to enforce that contract.
         """
         return {
-            "channel": self.channel,
+            "channel": self.initial_channel,
             "case_id": self.case_id,
             "trigger_id": self.trigger_id,
             "customer_id": self.customer.id,
@@ -420,6 +634,18 @@ class Case(BaseModel):
             "service_reason_narrative": self.service_event.narrative,
             "slot_count": str(len(self.offered_slots)),
             "slot_options": "; ".join(s.display for s in self.offered_slots),
+            "booked_slot_display": self.booked_slot_display
+            or lookup_slot_display(
+                offered_slots=self.offered_slots, slot_id=self.booked_slot_id
+            ),
+            "context_notes": self.context_notes,
+            # Hand the LLM the case state machine's view of where we are.
+            # Without this Kate cannot tell the outreach stage from a
+            # reminder run or a day-of run — she only sees prompt + history
+            # and ends up repeating prior turns.
+            "case_state": self.state.value,
+            "attempt_count": str(self.attempt_count),
+            "last_event_summary": _summarize_last_event(self.events),
         }
 
     @classmethod
@@ -520,9 +746,11 @@ def _audit_sample_case() -> Case:
             },
             "service_event": {"type": "maintenance", "summary": "sample"},
             "offered_slots": [],
-            "channel": "voice",
+            "initial_channel": "voice",
             "state": "created",
             "attempt_count": 0,
+            "reschedule_count": 0,
+            "booked_slot_display": "",
             "created_at": "2026-01-01T00:00:00Z",
         }
     )
@@ -544,6 +772,7 @@ __all__ = [
     "EventLevel",
     "EventSource",
     "OfferedSlot",
+    "lookup_slot_display",
     "PostCallReport",
     "PostCallStatus",
     "ServiceEvent",

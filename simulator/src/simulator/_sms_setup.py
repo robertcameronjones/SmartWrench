@@ -39,6 +39,8 @@ from prompt_composer import PromptPaths
 from sms_adapter import (
     RoutingStore,
     SmsCallSession,
+    SmsConsentChecker,
+    build_gated_twilio_sender,
     build_json_history_store,
     build_json_routing_store,
     build_litellm_completer,
@@ -55,6 +57,7 @@ def build_sms_session(
     case_repo: CaseRepository,
     bus: EventBus[CaseEvent],
     clock: Clock,
+    consent_checker: SmsConsentChecker | None = None,
 ) -> tuple[SmsCallSession | None, RoutingStore | None]:
     """Compose the live :class:`SmsCallSession` + its routing store, or ``(None, None)``.
 
@@ -98,18 +101,25 @@ def build_sms_session(
     workspace_root = project_root.parent
     prompt_paths = PromptPaths(
         system=project_root / "config" / "system-prompt.md",
+        post_booking=project_root / "config" / "prompt-post-booking.md",
         voice=project_root / "config" / "voice.md",
         sms=workspace_root / "sms_adapter" / "config" / "sms.md",
     )
 
     history = build_json_history_store(root=history_dir)
     routing = build_json_routing_store(path=routing_path)
+    twilio_send = build_twilio_sender(
+        account_sid=account_sid,
+        auth_token=auth_token,
+        from_number=from_number,
+    )
+    if consent_checker is not None:
+        twilio_send = build_gated_twilio_sender(
+            inner=twilio_send,
+            consent=consent_checker,
+        )
     session = build_sms_call_session(
-        twilio_send=build_twilio_sender(
-            account_sid=account_sid,
-            auth_token=auth_token,
-            from_number=from_number,
-        ),
+        twilio_send=twilio_send,
         llm_complete=build_litellm_completer(model=model, event_log_path=event_log_path),
         history=history,
         routing=routing,

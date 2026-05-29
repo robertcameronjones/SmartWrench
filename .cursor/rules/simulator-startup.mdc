@@ -1,0 +1,63 @@
+---
+description: How to start the local simulator without breaking master data or outbound API calls
+alwaysApply: true
+---
+
+# Simulator startup (READ BEFORE giving the user a run command)
+
+The simulator is a single FastAPI process at `simulator/` that fronts the
+`guidepoint`, `sms_adapter`, `llm`, and `prompt_composer` packages.
+
+## The one true startup command
+
+Run from a **normal terminal** (NOT from inside the Cursor agent — see the
+"Why the agent must not start it" section below):
+
+```bash
+cd /Users/robertjones/Documents/newmaintenance && python -m simulator --project-root 11Labs --host 127.0.0.1 --port 8000
+```
+
+Then open http://127.0.0.1:8000 (Basic Auth: `demo` / `demo` by default).
+
+## Why `--project-root 11Labs` is non‑negotiable
+
+The simulator resolves master-data fixtures and per-user data relative to
+`--project-root`, which defaults to `Path.cwd()`. The fixtures live at
+`11Labs/fixtures/{customers,dealers,vehicles,slots.json}`, **not** at the
+workspace root.
+
+If you start it with the wrong root:
+
+- `_seed_if_missing` finds no `<project_root>/fixtures/` and silently
+  creates an empty `<project_root>/data/users/<user_id>/` directory.
+- The next `GET /api/master-data` 404s and the UI paints completely empty
+  customer / vehicle / dealer / slots panels — looks like "all the data
+  is gone."
+- Cached browser state then spams `GET /api/cases/<old_id>` 404s.
+
+If this happens, the fix is:
+
+```bash
+rm -rf /Users/robertjones/Documents/newmaintenance/data/users/<user_id>
+```
+
+…and restart with the correct `--project-root 11Labs`. The seed will
+re-run on the next boot.
+
+## Why the agent must not start it
+
+Processes spawned from inside the Cursor agent's sandbox inherit
+`HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` environment variables pointing
+at the agent's local proxy (e.g. `127.0.0.1:55422`). That proxy rejects
+outbound traffic to OpenRouter and ElevenLabs with `403 Forbidden`,
+which surfaces as `httpx.ProxyError: 403 Forbidden` in the LLM stack
+trace — even though the API key and credits are fine.
+
+Always tell the user to run the command in their own terminal. Never
+background-launch the simulator from a tool call.
+
+## Optional: SMS testing
+
+The Twilio webhook points at an ngrok tunnel. Start ngrok separately
+against `:8000` and confirm the webhook URL still matches before
+expecting inbound SMS to land.

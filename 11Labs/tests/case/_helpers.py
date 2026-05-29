@@ -137,8 +137,24 @@ class FakeBookedCallSession:
         )
 
 
+@final
+class FakeOptedOutCallSession:
+    """Test fake — returns ``opted_out`` business outcome."""
+
+    async def place(self, case: Case) -> CallOutcome:
+        now = datetime(2026, 5, 10, 12, 0, 0, tzinfo=UTC)
+        return CallOutcome(
+            result="answered",
+            business_outcome="opted_out",
+            started_at=now,
+            ended_at=now,
+            duration_seconds=0.0,
+        )
+
+
 __all__ = [
     "FakeBookedCallSession",
+    "FakeOptedOutCallSession",
     "FixedClock",
     "sample_case",
     "sample_customer",

@@ -1,0 +1,346 @@
+{
+  "case_id": "case_038aae561c102ac6",
+  "trigger_id": "trig_4ef804c846d7",
+  "correlation_id": "corr_d5149ecc1558",
+  "customer": {
+    "id": "cust_jones_robert",
+    "first_name": "Robert",
+    "last_name": "Jones",
+    "phone": "+13139095330",
+    "opt_status": "opted_in",
+    "preferred_channel": "voice",
+    "timezone": "America/Detroit"
+  },
+  "dealer": {
+    "id": "dealer_village_jeep_royal_oak",
+    "name": "Village Jeep",
+    "phone": "+12487813798",
+    "address": "31200 Woodward Ave, Royal Oak, MI 48073",
+    "ride_radius_miles": 10
+  },
+  "vehicle": {
+    "vin": "1C4RJFBG5NC123456",
+    "owner_id": "cust_jones_robert",
+    "year": 2026,
+    "make": "Jeep",
+    "model": "Grand Cherokee",
+    "odometer_miles": 32180,
+    "current_location": {
+      "latitude": 42.4895,
+      "longitude": -83.1446,
+      "description": "Owner's home, driveway"
+    }
+  },
+  "service_event": {
+    "type": "maintenance",
+    "summary": "oil change",
+    "narrative": ""
+  },
+  "offered_slots": [
+    {
+      "id": "slot_2026_06_02_0830",
+      "starts_at": "2026-06-02T12:30:00Z",
+      "display": "Tuesday, June 2, 2026 - 8:30 AM"
+    },
+    {
+      "id": "slot_2026_06_02_1330",
+      "starts_at": "2026-06-02T17:30:00Z",
+      "display": "Tuesday, June 2, 2026 - 1:30 PM"
+    },
+    {
+      "id": "slot_2026_06_03_0900",
+      "starts_at": "2026-06-03T13:00:00Z",
+      "display": "Wednesday, June 3, 2026 - 9:00 AM"
+    }
+  ],
+  "initial_channel": "sms",
+  "user_id": "demo",
+  "state": "completed",
+  "attempt_count": 4,
+  "next_attempt_at": null,
+  "reschedule_count": 0,
+  "context_notes": "",
+  "call_attempts": [],
+  "events": [
+    {
+      "event_id": "evt_db852f27042f",
+      "case_id": "case_038aae561c102ac6",
+      "correlation_id": "corr_d5149ecc1558",
+      "attempt_number": 1,
+      "timestamp": "2026-05-27T14:44:55.846988Z",
+      "source": "system",
+      "level": "info",
+      "event": "case.outreach.started",
+      "detail": "business hours opened — placing initial outreach call"
+    },
+    {
+      "event_id": "evt_712618bfab40",
+      "case_id": "case_038aae561c102ac6",
+      "correlation_id": "corr_d5149ecc1558",
+      "attempt_number": 1,
+      "timestamp": "2026-05-27T14:44:59.098664Z",
+      "source": "sms",
+      "level": "info",
+      "event": "sms.opened",
+      "detail": "stage=outreach to=+13139095330 sid=SM7d1cb2167b88afe92e66bdfc2bbe06c4"
+    },
+    {
+      "event_id": "evt_132f80aa8cc1",
+      "case_id": "case_038aae561c102ac6",
+      "correlation_id": "corr_d5149ecc1558",
+      "attempt_number": 1,
+      "timestamp": "2026-05-27T14:49:06.854230Z",
+      "source": "sms",
+      "level": "info",
+      "event": "sms.inbound",
+      "detail": "from=+13139095330 body='Yes'"
+    },
+    {
+      "event_id": "evt_13697a564db2",
+      "case_id": "case_038aae561c102ac6",
+      "correlation_id": "corr_d5149ecc1558",
+      "attempt_number": 1,
+      "timestamp": "2026-05-27T14:49:09.136730Z",
+      "source": "sms",
+      "level": "info",
+      "event": "sms.outbound",
+      "detail": "sid=SM59ea6f4829d04003e257760a224860c1 body='Great! I have a few open slots available for you:  1. Tuesday, June 2, 2026 at 8:30 AM 2. Tuesday, June 2, 2026 at 1:30 PM 3. Wednesday, June 3, 2026 at 9:00 A…'"
+    },
+    {
+      "event_id": "evt_c165473e686a",
+      "case_id": "case_038aae561c102ac6",
+      "correlation_id": "corr_d5149ecc1558",
+      "attempt_number": 1,
+      "timestamp": "2026-05-27T14:49:17.038478Z",
+      "source": "sms",
+      "level": "info",
+      "event": "sms.inbound",
+      "detail": "from=+13139095330 body='1'"
+    },
+    {
+      "event_id": "evt_bb29b278e1ad",
+      "case_id": "case_038aae561c102ac6",
+      "correlation_id": "corr_d5149ecc1558",
+      "attempt_number": 1,
+      "timestamp": "2026-05-27T14:49:19.035249Z",
+      "source": "sms",
+      "level": "info",
+      "event": "sms.outbound",
+      "detail": "sid=SMa912e8e1cf730ba314e7ed67d2e7b38e body='Perfect! I’ve got you booked for Tuesday, June 2, 2026 at 8:30 AM at Village Jeep.  Thank you so much for your business, and have a wonderful day!'"
+    },
+    {
+      "event_id": "evt_bbf12a44f335",
+      "case_id": "case_038aae561c102ac6",
+      "correlation_id": "corr_d5149ecc1558",
+      "attempt_number": 1,
+      "timestamp": "2026-05-27T14:49:19.037036Z",
+      "source": "sms",
+      "level": "info",
+      "event": "sms.booked",
+      "detail": "slot=slot_2026_06_02_0830"
+    },
+    {
+      "event_id": "evt_6d39bb55ebb1",
+      "case_id": "case_038aae561c102ac6",
+      "correlation_id": "corr_d5149ecc1558",
+      "attempt_number": 1,
+      "timestamp": "2026-05-27T14:49:19.043629Z",
+      "source": "system",
+      "level": "info",
+      "event": "case.slot.picked",
+      "detail": "customer picked slot slot_2026_06_02_0830; confirming with dealer"
+    },
+    {
+      "event_id": "evt_3e7f69664509",
+      "case_id": "case_038aae561c102ac6",
+      "correlation_id": "corr_d5149ecc1558",
+      "attempt_number": 1,
+      "timestamp": "2026-05-27T14:49:19.046153Z",
+      "source": "system",
+      "level": "info",
+      "event": "case.booking.confirmed",
+      "detail": "dealer confirmed; initial reminder armed for 2026-06-01T12:30:00+00:00, final reminder armed for 2026-06-02T10:30:00+00:00"
+    },
+    {
+      "event_id": "evt_501585860773",
+      "case_id": "case_038aae561c102ac6",
+      "correlation_id": "corr_d5149ecc1558",
+      "attempt_number": 2,
+      "timestamp": "2026-05-27T14:54:16.453520Z",
+      "source": "system",
+      "level": "info",
+      "event": "case.initial_reminder.sending",
+      "detail": "placing initial reminder (T-24h)"
+    },
+    {
+      "event_id": "evt_96b5889b63cf",
+      "case_id": "case_038aae561c102ac6",
+      "correlation_id": "corr_d5149ecc1558",
+      "attempt_number": 2,
+      "timestamp": "2026-05-27T14:54:17.786755Z",
+      "source": "sms",
+      "level": "info",
+      "event": "sms.opened",
+      "detail": "stage=initial_reminder to=+13139095330 sid=SMf2adfad541ff47d9d944962d4b57f835"
+    },
+    {
+      "event_id": "evt_dfd3ac01bfe3",
+      "case_id": "case_038aae561c102ac6",
+      "correlation_id": "corr_d5149ecc1558",
+      "attempt_number": 2,
+      "timestamp": "2026-05-27T14:54:31.081737Z",
+      "source": "sms",
+      "level": "info",
+      "event": "sms.inbound",
+      "detail": "from=+13139095330 body='1'"
+    },
+    {
+      "event_id": "evt_6e216514d1ca",
+      "case_id": "case_038aae561c102ac6",
+      "correlation_id": "corr_d5149ecc1558",
+      "attempt_number": 2,
+      "timestamp": "2026-05-27T14:54:33.016478Z",
+      "source": "sms",
+      "level": "info",
+      "event": "sms.outbound",
+      "detail": "stage=initial_reminder ack=confirmed sid=SM6401b988c5cc3d7f5a44c064c52d5d34 body='Thank you for confirming! We look forward to seeing you on June 2nd at 8:30 AM. If you have any other questions before then, feel free to reply here.'"
+    },
+    {
+      "event_id": "evt_33dd8c3e89b9",
+      "case_id": "case_038aae561c102ac6",
+      "correlation_id": "corr_d5149ecc1558",
+      "attempt_number": 2,
+      "timestamp": "2026-05-27T14:54:33.018282Z",
+      "source": "sms",
+      "level": "info",
+      "event": "sms.confirmed",
+      "detail": "stage=initial_reminder customer reply='1'"
+    },
+    {
+      "event_id": "evt_4c4325a5c007",
+      "case_id": "case_038aae561c102ac6",
+      "correlation_id": "corr_d5149ecc1558",
+      "attempt_number": 2,
+      "timestamp": "2026-05-27T14:54:33.023961Z",
+      "source": "system",
+      "level": "info",
+      "event": "case.initial_reminder.confirmed",
+      "detail": "customer reconfirmed at initial reminder; final reminder remains armed"
+    },
+    {
+      "event_id": "evt_f171cdf4abbd",
+      "case_id": "case_038aae561c102ac6",
+      "correlation_id": "corr_d5149ecc1558",
+      "attempt_number": 3,
+      "timestamp": "2026-05-27T15:07:57.349823Z",
+      "source": "system",
+      "level": "info",
+      "event": "case.final_reminder.sending",
+      "detail": "placing final reminder (day-of)"
+    },
+    {
+      "event_id": "evt_ce0b646bd2fb",
+      "case_id": "case_038aae561c102ac6",
+      "correlation_id": "corr_d5149ecc1558",
+      "attempt_number": 3,
+      "timestamp": "2026-05-27T15:07:58.413832Z",
+      "source": "sms",
+      "level": "info",
+      "event": "sms.opened",
+      "detail": "stage=final_reminder to=+13139095330 sid=SM2b1230fc4ec41f3c118e4ba9e5b875a6"
+    },
+    {
+      "event_id": "evt_9204cdc7252e",
+      "case_id": "case_038aae561c102ac6",
+      "correlation_id": "corr_d5149ecc1558",
+      "attempt_number": 3,
+      "timestamp": "2026-05-27T15:08:11.158772Z",
+      "source": "sms",
+      "level": "info",
+      "event": "sms.inbound",
+      "detail": "from=+13139095330 body='1'"
+    },
+    {
+      "event_id": "evt_c31bf6495c69",
+      "case_id": "case_038aae561c102ac6",
+      "correlation_id": "corr_d5149ecc1558",
+      "attempt_number": 3,
+      "timestamp": "2026-05-27T15:08:17.454128Z",
+      "source": "system",
+      "level": "info",
+      "event": "case.geofence.entered",
+      "detail": "vehicle entered dealer geofence"
+    },
+    {
+      "event_id": "evt_d2fc25834cd4",
+      "case_id": "case_038aae561c102ac6",
+      "correlation_id": "corr_d5149ecc1558",
+      "attempt_number": 3,
+      "timestamp": "2026-05-27T15:08:20.933127Z",
+      "source": "sms",
+      "level": "info",
+      "event": "sms.outbound",
+      "detail": "stage=final_reminder ack=confirmed sid=SMcc4f216dfe99fe7b2d500f3ff40197b1 body=\"Got it — the system isn't expecting input from me right now.\""
+    },
+    {
+      "event_id": "evt_179f906ae9e1",
+      "case_id": "case_038aae561c102ac6",
+      "correlation_id": "corr_d5149ecc1558",
+      "attempt_number": 3,
+      "timestamp": "2026-05-27T15:08:20.935809Z",
+      "source": "sms",
+      "level": "info",
+      "event": "sms.confirmed",
+      "detail": "stage=final_reminder customer reply='1'"
+    },
+    {
+      "event_id": "evt_bf37265de3c0",
+      "case_id": "case_038aae561c102ac6",
+      "correlation_id": "corr_d5149ecc1558",
+      "attempt_number": 4,
+      "timestamp": "2026-05-27T21:57:54.713468Z",
+      "source": "system",
+      "level": "info",
+      "event": "case.geofence.exited",
+      "detail": "vehicle exited dealer — service event complete"
+    },
+    {
+      "event_id": "evt_ac8316466c38",
+      "case_id": "case_038aae561c102ac6",
+      "correlation_id": "corr_d5149ecc1558",
+      "attempt_number": 4,
+      "timestamp": "2026-05-27T21:57:55.671560Z",
+      "source": "sms",
+      "level": "info",
+      "event": "sms.opened",
+      "detail": "stage=feedback to=+13139095330 sid=SM2f3d0478be6df7bbaacd882e6ff99ba3"
+    },
+    {
+      "event_id": "evt_9dcdb32ef1f3",
+      "case_id": "case_038aae561c102ac6",
+      "correlation_id": "corr_d5149ecc1558",
+      "attempt_number": 4,
+      "timestamp": "2026-05-28T21:57:55.597924Z",
+      "source": "sms",
+      "level": "info",
+      "event": "sms.timeout",
+      "detail": "stage=feedback no inbound within 1 day, 0:00:00"
+    },
+    {
+      "event_id": "evt_2638d890d3df",
+      "case_id": "case_038aae561c102ac6",
+      "correlation_id": "corr_d5149ecc1558",
+      "attempt_number": 4,
+      "timestamp": "2026-05-28T21:57:55.606116Z",
+      "source": "system",
+      "level": "info",
+      "event": "case.closed.completed",
+      "detail": "feedback skipped; service event complete"
+    }
+  ],
+  "outcome_detail": "feedback_silence_completes",
+  "booked_slot_id": "slot_2026_06_02_0830",
+  "booked_slot_display": "Tuesday, June 2, 2026 - 8:30 AM",
+  "created_at": "2026-05-27T14:44:55.839970Z",
+  "closed_at": "2026-05-28T21:57:55.605245Z"
+}

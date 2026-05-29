@@ -42,16 +42,30 @@ class TestOfferedSlot:
 class TestCaseStates:
     def test_terminal_states_marked(self) -> None:
         assert CaseState.BOOKED.is_terminal
-        assert CaseState.UNREACHABLE.is_terminal
-        assert CaseState.CANCELLED.is_terminal
-        assert CaseState.ESCALATED.is_terminal
         assert CaseState.DECLINED.is_terminal
+        assert CaseState.CANCELLED.is_terminal
+        assert CaseState.ABANDONED.is_terminal
+        assert CaseState.NO_SHOW.is_terminal
+        assert CaseState.RESCHEDULE_FAILED.is_terminal
+        assert CaseState.OPTED_OUT.is_terminal
+        assert CaseState.COMPLETED.is_terminal
 
     def test_non_terminal_states(self) -> None:
-        assert not CaseState.CREATED.is_terminal
-        assert not CaseState.READY_TO_CALL.is_terminal
-        assert not CaseState.CALLING.is_terminal
-        assert not CaseState.BETWEEN_ATTEMPTS.is_terminal
+        for state in (
+            CaseState.CREATED,
+            CaseState.CONTACTING_CUSTOMER,
+            CaseState.SLOT_PROPOSED,
+            CaseState.SLOT_PICKED,
+            CaseState.CONFIRMING_WITH_DEALER,
+            CaseState.INITIAL_REMINDER_DUE,
+            CaseState.INITIAL_REMINDER_SENT,
+            CaseState.RESCHEDULING,
+            CaseState.FINAL_REMINDER_DUE,
+            CaseState.FINAL_REMINDER_SENT,
+            CaseState.SHOWED,
+            CaseState.AWAITING_FEEDBACK,
+        ):
+            assert not state.is_terminal, f"{state.value} should be non-terminal"
 
 
 class TestCase:
@@ -65,6 +79,7 @@ class TestCase:
             "customer_phone",
             "dealer_name",
             "dealer_phone",
+            "dealer_address",
             "ride_radius_miles",
             "vehicle_year",
             "vehicle_make",
@@ -75,6 +90,8 @@ class TestCase:
             "service_reason_narrative",
             "slot_count",
             "slot_options",
+            "booked_slot_display",
+            "context_notes",
         ):
             assert key in flat
 
@@ -97,6 +114,133 @@ class TestCase:
         bad = {**case.model_dump(mode="json"), "rogue": True}
         with pytest.raises(ValidationError):
             Case.model_validate(bad)
+
+    def test_initial_channel_defaults_to_voice(self) -> None:
+        case = sample_case()
+        assert case.initial_channel == "voice"
+
+    def test_reschedule_count_defaults_to_zero(self) -> None:
+        assert sample_case().reschedule_count == 0
+
+    def test_context_notes_defaults_empty(self) -> None:
+        assert sample_case().context_notes == ""
+
+    def test_context_notes_length_capped(self) -> None:
+        case = sample_case()
+        bad = {**case.model_dump(mode="json"), "context_notes": "x" * 201}
+        with pytest.raises(ValidationError):
+            Case.model_validate(bad)
+
+    def test_booked_slot_display_defaults_empty(self) -> None:
+        assert sample_case().booked_slot_display == ""
+
+    def test_to_variables_uses_booked_slot_display(self) -> None:
+        case = sample_case()
+        case = case.model_copy(
+            update={
+                "booked_slot_id": SlotId("slot_a"),
+                "booked_slot_display": "Tuesday, May 12, 2026 - 8:30 AM",
+            }
+        )
+        assert case.to_variables()["booked_slot_display"] == (
+            "Tuesday, May 12, 2026 - 8:30 AM"
+        )
+
+    def test_to_variables_falls_back_to_offered_slot_display(self) -> None:
+        case = sample_case().model_copy(update={"booked_slot_id": SlotId("slot_a")})
+        flat = case.to_variables()
+        assert "slot_a" not in flat["booked_slot_display"]
+        assert flat["booked_slot_display"] == case.offered_slots[0].display
+
+    def test_to_variables_channel_sourced_from_initial_channel(self) -> None:
+        flat = sample_case().to_variables()
+        # Phase 7 may rename the dict key; today we keep it stable for
+        # the existing system-prompt.md template.
+        assert flat["channel"] == "voice"
+
+
+class TestLegacyMigration:
+    """The v1→v2 model validator: legacy JSON loads as v2 shape."""
+
+    def _v1_case_dict(self) -> dict[str, object]:
+        """A minimal case dict in v1 shape (no validator-rejected fields)."""
+        case = sample_case()
+        raw = case.model_dump(mode="json")
+        # Reshape into v1: drop v2 fields, rename initial_channel back.
+        raw["channel"] = raw.pop("initial_channel")
+        raw.pop("reschedule_count", None)
+        raw.pop("context_notes", None)
+        return raw
+
+    def test_legacy_channel_field_migrates_to_initial_channel(self) -> None:
+        v1 = self._v1_case_dict()
+        v1["channel"] = "sms"
+        loaded = Case.model_validate(v1)
+        assert loaded.initial_channel == "sms"
+
+    def test_legacy_calling_state_migrates_to_contacting_customer(self) -> None:
+        v1 = self._v1_case_dict()
+        v1["state"] = "calling"
+        loaded = Case.model_validate(v1)
+        assert loaded.state == CaseState.CONTACTING_CUSTOMER
+
+    def test_legacy_ready_to_call_state_migrates_to_contacting_customer(self) -> None:
+        v1 = self._v1_case_dict()
+        v1["state"] = "ready_to_call"
+        loaded = Case.model_validate(v1)
+        assert loaded.state == CaseState.CONTACTING_CUSTOMER
+
+    def test_legacy_between_attempts_state_migrates_to_contacting_customer(self) -> None:
+        v1 = self._v1_case_dict()
+        v1["state"] = "between_attempts"
+        loaded = Case.model_validate(v1)
+        assert loaded.state == CaseState.CONTACTING_CUSTOMER
+
+    def test_legacy_unreachable_state_migrates_to_abandoned(self) -> None:
+        v1 = self._v1_case_dict()
+        v1["state"] = "unreachable"
+        loaded = Case.model_validate(v1)
+        assert loaded.state == CaseState.ABANDONED
+
+    def test_legacy_escalated_state_migrates_to_abandoned(self) -> None:
+        v1 = self._v1_case_dict()
+        v1["state"] = "escalated"
+        loaded = Case.model_validate(v1)
+        assert loaded.state == CaseState.ABANDONED
+
+    def test_legacy_awaiting_reminder_migrates_to_initial_reminder_due(self) -> None:
+        v1 = self._v1_case_dict()
+        v1["state"] = "awaiting_reminder"
+        loaded = Case.model_validate(v1)
+        assert loaded.state == CaseState.INITIAL_REMINDER_DUE
+
+    def test_legacy_reminded_migrates_to_initial_reminder_sent(self) -> None:
+        v1 = self._v1_case_dict()
+        v1["state"] = "reminded"
+        loaded = Case.model_validate(v1)
+        assert loaded.state == CaseState.INITIAL_REMINDER_SENT
+
+    def test_legacy_confirmed_migrates_to_final_reminder_due(self) -> None:
+        v1 = self._v1_case_dict()
+        v1["state"] = "confirmed"
+        loaded = Case.model_validate(v1)
+        assert loaded.state == CaseState.FINAL_REMINDER_DUE
+
+    def test_legacy_day_of_migrates_to_final_reminder_sent(self) -> None:
+        v1 = self._v1_case_dict()
+        v1["state"] = "day_of"
+        loaded = Case.model_validate(v1)
+        assert loaded.state == CaseState.FINAL_REMINDER_SENT
+
+    def test_legacy_case_defaults_reschedule_count(self) -> None:
+        v1 = self._v1_case_dict()
+        loaded = Case.model_validate(v1)
+        assert loaded.reschedule_count == 0
+
+    def test_legacy_case_defaults_context_notes(self) -> None:
+        v1 = self._v1_case_dict()
+        loaded = Case.model_validate(v1)
+        assert loaded.context_notes == ""
 
 
 class TestTranscriptTurn:

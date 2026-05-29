@@ -47,7 +47,15 @@ def complete(
     so callers can decide whether to retry or surface the error to the
     customer.
     """
+    import litellm
     from litellm import completion
+
+    # Surface the upstream response body on errors. LiteLLM normally
+    # raises ``APIError`` with only the HTTP status — invisible bodies
+    # make 4xx/5xx unreadable. ``set_verbose`` adds the body and headers
+    # to the exception chain so the caller can log the provider's
+    # actual rejection reason.
+    litellm.set_verbose = True  # type: ignore[attr-defined]
 
     t0 = time.time()
     try:
@@ -56,9 +64,19 @@ def complete(
             kwargs["extra_body"] = extra_body
         resp = completion(**kwargs)
     except Exception as exc:
+        body = getattr(exc, "response", None)
+        body_text = ""
+        if body is not None:
+            try:
+                body_text = body.text
+            except Exception:
+                body_text = ""
+        err = f"{type(exc).__name__}: {exc}"
+        if body_text:
+            err = f"{err} | body={body_text}"
         return "", {
             "model": model,
-            "error": f"{type(exc).__name__}: {exc}",
+            "error": err,
             "elapsed_ms": int((time.time() - t0) * 1000),
         }
 

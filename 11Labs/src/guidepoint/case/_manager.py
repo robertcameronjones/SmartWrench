@@ -62,6 +62,7 @@ from guidepoint.case._trigger_source import TriggerSource
 from guidepoint.clock import Clock
 from guidepoint.events import EventBus
 from guidepoint.master_data import (
+    CustomerNotFoundError,
     MasterDataRepository,
 )
 
@@ -221,28 +222,40 @@ class _DefaultCaseManager:
         return case
 
     async def _initialize(self, trigger: Trigger) -> Case:
-        """Build the case, persist it, transition to CALLING, emit.
+        """Build the case, persist it, transition to CONTACTING_CUSTOMER, emit.
 
         Synchronous from the caller's POV: any error here surfaces to
         the route handler as a 409 / 500 rather than getting swallowed
-        in a background task. Once we return CALLING, ownership flips
-        to the background attempt.
+        in a background task. Once we return CONTACTING_CUSTOMER,
+        ownership flips to the background attempt.
         """
         case = self._build_case(trigger)
+        if trigger.channel_preference == "sms":
+            customer = self._master_data.get_customer(
+                self._master_data.get_vehicle(trigger.vehicle_vin).owner_id
+            )
+            if not customer.sms_consent:
+                detail = f"customer {customer.id!r} has opted out of SMS"
+                self._trigger_source.mark_failed(trigger.id, error_detail=detail)
+                raise CaseError(detail)
         self._case_repo.save(case)
         await self._emit(case, "case.created", f"trigger={trigger.id}")
 
-        case = self._case_repo.update_state(case.case_id, new_state=CaseState.CALLING)
-        await self._emit(case, "case.calling", f"attempt {case.attempt_count + 1}")
+        case = self._case_repo.update_state(
+            case.case_id, new_state=CaseState.CONTACTING_CUSTOMER
+        )
+        await self._emit(
+            case, "case.contacting_customer", f"attempt {case.attempt_count + 1}"
+        )
         return case
 
     async def _run_attempt(self, *, case: Case, trigger_id: str) -> None:
         """Place the attempt, append it, decide terminal, persist + emit + mark trigger."""
-        session = self._call_sessions.get(case.channel)
+        session = self._call_sessions.get(case.initial_channel)
         if session is None:
             available = ", ".join(sorted(self._call_sessions.keys())) or "(none)"
             raise CaseError(
-                f"no CallSession registered for channel {case.channel!r} "
+                f"no CallSession registered for channel {case.initial_channel!r} "
                 f"(available: {available})"
             )
 
@@ -262,16 +275,20 @@ class _DefaultCaseManager:
             new_state=terminal_state,
             outcome_detail=detail,
             booked_slot_id=outcome.booked_slot_id,
+            booked_slot_display=outcome.booked_slot_display,
             closed_at=self._clock.now(),
         )
         await self._emit(case, f"case.{terminal_state.value}", detail)
+
+        if outcome.business_outcome == "opted_out":
+            self._persist_customer_opt_out(case)
 
         self._trigger_source.mark_fired(trigger_id, case_id=case.case_id)
         _log.info(
             "case.attempt.complete",
             case_id=case.case_id,
             trigger_id=trigger_id,
-            channel=case.channel,
+            channel=case.initial_channel,
             terminal_state=terminal_state.value,
             correlation_id=case.correlation_id,
         )
@@ -281,9 +298,9 @@ class _DefaultCaseManager:
 
         ``asyncio.create_task`` swallows exceptions until the task is
         awaited; the ``start()`` caller never awaits, so we log here
-        and best-effort write a terminal UNREACHABLE on the case so
-        the operator isn't left staring at a CALLING that never
-        resolves.
+        and best-effort write a terminal ABANDONED on the case so
+        the operator isn't left staring at a CONTACTING_CUSTOMER that
+        never resolves.
         """
         try:
             await self._run_attempt(case=case, trigger_id=trigger_id)
@@ -292,20 +309,20 @@ class _DefaultCaseManager:
                 "case.attempt.errored",
                 case_id=case.case_id,
                 trigger_id=trigger_id,
-                channel=case.channel,
+                channel=case.initial_channel,
                 error=f"{type(exc).__name__}: {exc}",
             )
             try:
                 terminal = self._case_repo.update_outcome(
                     case.case_id,
-                    new_state=CaseState.UNREACHABLE,
+                    new_state=CaseState.ABANDONED,
                     outcome_detail=f"attempt errored: {type(exc).__name__}: {exc}",
                     booked_slot_id=None,
                     closed_at=self._clock.now(),
                 )
                 await self._emit(
                     terminal,
-                    "case.unreachable",
+                    "case.abandoned",
                     f"attempt errored: {type(exc).__name__}: {exc}",
                 )
                 self._trigger_source.mark_failed(trigger_id, error_detail=str(exc))
@@ -336,6 +353,17 @@ class _DefaultCaseManager:
             self._trigger_source.mark_failed(trigger.id, error_detail=str(exc))
             raise
 
+    def _persist_customer_opt_out(self, case: Case) -> None:
+        try:
+            customer = self._master_data.get_customer(case.customer.id)
+        except CustomerNotFoundError:
+            return
+        if customer.opt_status == "opted_out":
+            return
+        self._master_data.save_customer(
+            customer.model_copy(update={"opt_status": "opted_out"})
+        )
+
     async def _emit(self, case: Case, event_name: str, detail: str) -> None:
         event = CaseEvent(
             event_id=f"evt_{secrets.token_hex(6)}",
@@ -354,7 +382,12 @@ class _DefaultCaseManager:
 
 _BUSINESS_TO_STATE: dict[str, tuple[CaseState, str]] = {
     "declined": (CaseState.DECLINED, "customer declined"),
-    "transferred": (CaseState.ESCALATED, "transferred to human"),
+    "opted_out": (CaseState.OPTED_OUT, "customer opted out"),
+    # "transferred" formerly mapped to ESCALATED; v2 has no human-handoff
+    # state today, so we collapse it into ABANDONED with a specific
+    # detail string. If/when escalation comes back as a v2 stage the
+    # reducer (Phase 3) becomes the right place to encode it.
+    "transferred": (CaseState.ABANDONED, "transferred to human"),
 }
 
 _RESULT_TO_DETAIL: dict[str, str] = {
@@ -373,9 +406,9 @@ def _decide_terminal_state(
     """Pure: map a CallOutcome + retry policy to a terminal CaseState.
 
     Single-shot policy (max_attempts=1) bypasses retries entirely:
-    every non-business outcome lands in ``UNREACHABLE``. When we add
-    multi-attempt policies, this function gains a ``BETWEEN_ATTEMPTS``
-    branch — and only this function changes.
+    every non-business outcome lands in ``ABANDONED``. The future v2
+    reducer (Phase 3) supersedes this logic; v1 keeps it for the
+    pre-reducer path that still drives single-attempt cases today.
     """
     if outcome.business_outcome == "booked":
         slot = outcome.booked_slot_id or "(unknown slot)"
@@ -383,11 +416,11 @@ def _decide_terminal_state(
     if outcome.business_outcome in _BUSINESS_TO_STATE:
         return _BUSINESS_TO_STATE[outcome.business_outcome]
     if current_attempt < retry_policy.max_attempts:  # pragma: no cover (multi-attempt unused)
-        return CaseState.BETWEEN_ATTEMPTS, "scheduling retry"
+        return CaseState.CONTACTING_CUSTOMER, "scheduling retry"
     if outcome.result == "error":
-        return CaseState.UNREACHABLE, f"error: {outcome.error_detail or 'unknown'}"
+        return CaseState.ABANDONED, f"error: {outcome.error_detail or 'unknown'}"
     detail = _RESULT_TO_DETAIL.get(outcome.result, "inconclusive call")
-    return CaseState.UNREACHABLE, detail
+    return CaseState.ABANDONED, detail
 
 
 __all__ = [

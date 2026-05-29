@@ -54,6 +54,7 @@ def _report_to_outcome(report: PostCallReport) -> CallOutcome:
         result=result,
         business_outcome=report.business_outcome,
         booked_slot_id=report.booked_slot_id,
+        booked_slot_display=report.booked_slot_display,
         elevenlabs_conversation_id=report.elevenlabs_conversation_id,
         started_at=report.started_at,
         ended_at=report.ended_at,

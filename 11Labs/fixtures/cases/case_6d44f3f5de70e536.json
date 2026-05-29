@@ -1,0 +1,148 @@
+{
+  "case_id": "case_6d44f3f5de70e536",
+  "trigger_id": "trig_960b86ae8cc2",
+  "correlation_id": "corr_c8373d73e751",
+  "customer": {
+    "id": "cust_jones_robert",
+    "first_name": "Robert",
+    "last_name": "Jones",
+    "phone": "+13139095330",
+    "opt_status": "opted_in",
+    "preferred_channel": "voice",
+    "timezone": "America/Detroit"
+  },
+  "dealer": {
+    "id": "dealer_village_jeep_royal_oak",
+    "name": "Village Jeep",
+    "phone": "+12487813798",
+    "address": "31200 Woodward Ave, Royal Oak, MI 48073",
+    "ride_radius_miles": 10
+  },
+  "vehicle": {
+    "vin": "1C4RJFBG5NC123456",
+    "owner_id": "cust_jones_robert",
+    "year": 2026,
+    "make": "Jeep",
+    "model": "Grand Cherokee",
+    "odometer_miles": 32180,
+    "current_location": {
+      "latitude": 42.4895,
+      "longitude": -83.1446,
+      "description": "Owner's home, driveway"
+    }
+  },
+  "service_event": {
+    "type": "maintenance",
+    "summary": "oil change",
+    "narrative": ""
+  },
+  "offered_slots": [
+    {
+      "id": "slot_2026_06_02_0830",
+      "starts_at": "2026-06-02T12:30:00Z",
+      "display": "Tuesday, June 2, 2026 - 8:30 AM"
+    },
+    {
+      "id": "slot_2026_06_02_1330",
+      "starts_at": "2026-06-02T17:30:00Z",
+      "display": "Tuesday, June 2, 2026 - 1:30 PM"
+    },
+    {
+      "id": "slot_2026_06_03_0900",
+      "starts_at": "2026-06-03T13:00:00Z",
+      "display": "Wednesday, June 3, 2026 - 9:00 AM"
+    }
+  ],
+  "initial_channel": "voice",
+  "user_id": "demo",
+  "state": "abandoned",
+  "attempt_count": 2,
+  "next_attempt_at": null,
+  "reschedule_count": 0,
+  "context_notes": "",
+  "call_attempts": [],
+  "events": [
+    {
+      "event_id": "evt_a6e9a000bcae",
+      "case_id": "case_6d44f3f5de70e536",
+      "correlation_id": "corr_c8373d73e751",
+      "attempt_number": 1,
+      "timestamp": "2026-05-27T14:39:17.762818Z",
+      "source": "system",
+      "level": "info",
+      "event": "case.outreach.started",
+      "detail": "business hours opened — placing initial outreach call"
+    },
+    {
+      "event_id": "evt_1469c8a22d4f",
+      "case_id": "case_6d44f3f5de70e536",
+      "correlation_id": "corr_c8373d73e751",
+      "attempt_number": 1,
+      "timestamp": "2026-05-27T14:39:17.765396Z",
+      "source": "system",
+      "level": "info",
+      "event": "call.dialing",
+      "detail": "stage=outreach to=+13139095330"
+    },
+    {
+      "event_id": "evt_54c806f491fd",
+      "case_id": "case_6d44f3f5de70e536",
+      "correlation_id": "corr_c8373d73e751",
+      "attempt_number": 1,
+      "timestamp": "2026-05-27T14:39:17.814178Z",
+      "source": "elevenlabs",
+      "level": "info",
+      "event": "call.placement_failed",
+      "detail": "stage=outreach ProxyError: 403 Forbidden"
+    },
+    {
+      "event_id": "evt_56badd4c2e7f",
+      "case_id": "case_6d44f3f5de70e536",
+      "correlation_id": "corr_c8373d73e751",
+      "attempt_number": 2,
+      "timestamp": "2026-05-27T14:39:17.823038Z",
+      "source": "system",
+      "level": "info",
+      "event": "case.call.retry",
+      "detail": "incomplete call; retrying (2/2)"
+    },
+    {
+      "event_id": "evt_ee9f9169adf8",
+      "case_id": "case_6d44f3f5de70e536",
+      "correlation_id": "corr_c8373d73e751",
+      "attempt_number": 2,
+      "timestamp": "2026-05-27T14:39:17.823543Z",
+      "source": "system",
+      "level": "info",
+      "event": "call.dialing",
+      "detail": "stage=outreach to=+13139095330"
+    },
+    {
+      "event_id": "evt_1e4ed9d3ed5d",
+      "case_id": "case_6d44f3f5de70e536",
+      "correlation_id": "corr_c8373d73e751",
+      "attempt_number": 2,
+      "timestamp": "2026-05-27T14:39:17.826965Z",
+      "source": "elevenlabs",
+      "level": "info",
+      "event": "call.placement_failed",
+      "detail": "stage=outreach ProxyError: 403 Forbidden"
+    },
+    {
+      "event_id": "evt_3f38aead424e",
+      "case_id": "case_6d44f3f5de70e536",
+      "correlation_id": "corr_c8373d73e751",
+      "attempt_number": 2,
+      "timestamp": "2026-05-27T14:39:17.831189Z",
+      "source": "system",
+      "level": "warn",
+      "event": "case.closed.abandoned",
+      "detail": "outreach exhausted retry budget"
+    }
+  ],
+  "outcome_detail": "outreach_abandoned",
+  "booked_slot_id": null,
+  "booked_slot_display": "",
+  "created_at": "2026-05-27T14:39:17.755759Z",
+  "closed_at": "2026-05-27T14:39:17.830942Z"
+}

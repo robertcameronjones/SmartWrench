@@ -37,7 +37,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Protocol, final
 
-from prompt_composer import PromptPaths
+from prompt_composer import PromptPaths, PromptStage
 
 __all__: list[str] = []
 
@@ -150,16 +150,28 @@ class RoutingStore(Protocol):
 from sms_adapter._call_session import (  # noqa: E402
     DEFAULT_INACTIVITY_TIMEOUT,
     SmsCallSession,
+    build_sms_call_manager,
     build_sms_call_session,
 )
 from sms_adapter._history import build_json_history_store  # noqa: E402
+from sms_adapter._gated_twilio import (  # noqa: E402
+    SmsConsentChecker,
+    SmsConsentError,
+    build_gated_twilio_sender,
+)
 from sms_adapter._llm import build_litellm_completer  # noqa: E402
+from sms_adapter._optout import (  # noqa: E402
+    is_opt_in_keyword,
+    is_opt_out_keyword,
+    normalize_sms_body,
+)
 from sms_adapter._routing import build_json_routing_store  # noqa: E402
 from sms_adapter._twilio import build_twilio_sender  # noqa: E402
 
 __all__ = [
     # value objects
     "PromptPaths",
+    "PromptStage",
     "RoutingEntry",
     "Turn",
     "TurnRole",
@@ -171,10 +183,17 @@ __all__ = [
     # CallSession implementation (satisfies guidepoint.case.CallSession Protocol)
     "DEFAULT_INACTIVITY_TIMEOUT",
     "SmsCallSession",
+    "build_sms_call_manager",
     "build_sms_call_session",
     # live factories (simulator wiring uses these)
     "build_json_history_store",
     "build_json_routing_store",
+    "build_gated_twilio_sender",
     "build_litellm_completer",
     "build_twilio_sender",
+    "is_opt_in_keyword",
+    "is_opt_out_keyword",
+    "normalize_sms_body",
+    "SmsConsentChecker",
+    "SmsConsentError",
 ]

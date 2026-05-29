@@ -1,0 +1,192 @@
+{
+  "case_id": "case_f8c11c1fdd89ce02",
+  "trigger_id": "trig_2cd37384224c",
+  "correlation_id": "corr_73aaf687a293",
+  "customer": {
+    "id": "cust_jones_robert",
+    "first_name": "Robert",
+    "last_name": "Jones",
+    "phone": "+13139095330",
+    "opt_status": "opted_in",
+    "preferred_channel": "voice",
+    "timezone": "America/Detroit"
+  },
+  "dealer": {
+    "id": "dealer_village_jeep_royal_oak",
+    "name": "Village Jeep",
+    "phone": "+12487813798",
+    "address": "31200 Woodward Ave, Royal Oak, MI 48073",
+    "ride_radius_miles": 10
+  },
+  "vehicle": {
+    "vin": "1C4RJFBG5NC123456",
+    "owner_id": "cust_jones_robert",
+    "year": 2026,
+    "make": "Jeep",
+    "model": "Grand Cherokee",
+    "odometer_miles": 32180,
+    "current_location": {
+      "latitude": 42.4895,
+      "longitude": -83.1446,
+      "description": "Owner's home, driveway"
+    }
+  },
+  "service_event": {
+    "type": "maintenance",
+    "summary": "oil change",
+    "narrative": ""
+  },
+  "offered_slots": [
+    {
+      "id": "slot_2026_06_02_0830",
+      "starts_at": "2026-06-02T12:30:00Z",
+      "display": "Tuesday, June 2, 2026 - 8:30 AM"
+    },
+    {
+      "id": "slot_2026_06_02_1330",
+      "starts_at": "2026-06-02T17:30:00Z",
+      "display": "Tuesday, June 2, 2026 - 1:30 PM"
+    },
+    {
+      "id": "slot_2026_06_03_0900",
+      "starts_at": "2026-06-03T13:00:00Z",
+      "display": "Wednesday, June 3, 2026 - 9:00 AM"
+    }
+  ],
+  "initial_channel": "sms",
+  "user_id": "demo",
+  "state": "reminded",
+  "attempt_count": 2,
+  "next_attempt_at": null,
+  "reschedule_count": 0,
+  "context_notes": "",
+  "call_attempts": [],
+  "events": [
+    {
+      "event_id": "evt_604f4f1f912f",
+      "case_id": "case_f8c11c1fdd89ce02",
+      "correlation_id": "corr_73aaf687a293",
+      "attempt_number": 1,
+      "timestamp": "2026-05-26T22:32:35.693798Z",
+      "source": "system",
+      "level": "info",
+      "event": "case.outreach.started",
+      "detail": "business hours opened — placing initial outreach call"
+    },
+    {
+      "event_id": "evt_9bcc685f992f",
+      "case_id": "case_f8c11c1fdd89ce02",
+      "correlation_id": "corr_73aaf687a293",
+      "attempt_number": 1,
+      "timestamp": "2026-05-26T22:32:36.865258Z",
+      "source": "sms",
+      "level": "info",
+      "event": "sms.opened",
+      "detail": "stage=outreach to=+13139095330 sid=SM3df4281c26f791d51032abb8443a3d81"
+    },
+    {
+      "event_id": "evt_fecadc692c37",
+      "case_id": "case_f8c11c1fdd89ce02",
+      "correlation_id": "corr_73aaf687a293",
+      "attempt_number": 1,
+      "timestamp": "2026-05-26T22:32:52.996929Z",
+      "source": "sms",
+      "level": "info",
+      "event": "sms.inbound",
+      "detail": "from=+13139095330 body='Yes'"
+    },
+    {
+      "event_id": "evt_21655263c350",
+      "case_id": "case_f8c11c1fdd89ce02",
+      "correlation_id": "corr_73aaf687a293",
+      "attempt_number": 1,
+      "timestamp": "2026-05-26T22:32:54.839565Z",
+      "source": "sms",
+      "level": "info",
+      "event": "sms.outbound",
+      "detail": "sid=SM81b8761412209f4d9a489d2daeec1eef body='Great! Here are the available times for you to choose from:  1. Tuesday, June 2, 2026 - 8:30 AM 2. Tuesday, June 2, 2026 - 1:30 PM 3. Wednesday, June 3, 2026 -…'"
+    },
+    {
+      "event_id": "evt_07f8596b6b07",
+      "case_id": "case_f8c11c1fdd89ce02",
+      "correlation_id": "corr_73aaf687a293",
+      "attempt_number": 1,
+      "timestamp": "2026-05-26T22:33:01.440144Z",
+      "source": "sms",
+      "level": "info",
+      "event": "sms.inbound",
+      "detail": "from=+13139095330 body='1'"
+    },
+    {
+      "event_id": "evt_2775c02d68b9",
+      "case_id": "case_f8c11c1fdd89ce02",
+      "correlation_id": "corr_73aaf687a293",
+      "attempt_number": 1,
+      "timestamp": "2026-05-26T22:33:02.311143Z",
+      "source": "sms",
+      "level": "info",
+      "event": "sms.outbound",
+      "detail": "sid=SMa439cc7b6de1a7bce90d6885b2464065 body='Perfect! I’ve got you all set for Tuesday, June 2, 2026, at 8:30 AM at Village Jeep.  Thank you so much for your business, and we look forward to keeping your …'"
+    },
+    {
+      "event_id": "evt_65eee9d16f63",
+      "case_id": "case_f8c11c1fdd89ce02",
+      "correlation_id": "corr_73aaf687a293",
+      "attempt_number": 1,
+      "timestamp": "2026-05-26T22:33:02.312645Z",
+      "source": "sms",
+      "level": "info",
+      "event": "sms.booked",
+      "detail": "slot=slot_2026_06_02_0830"
+    },
+    {
+      "event_id": "evt_9d0d1d92824f",
+      "case_id": "case_f8c11c1fdd89ce02",
+      "correlation_id": "corr_73aaf687a293",
+      "attempt_number": 1,
+      "timestamp": "2026-05-26T22:33:02.318218Z",
+      "source": "system",
+      "level": "info",
+      "event": "case.slot.picked",
+      "detail": "customer picked slot slot_2026_06_02_0830; confirming with dealer"
+    },
+    {
+      "event_id": "evt_738ea1df6d49",
+      "case_id": "case_f8c11c1fdd89ce02",
+      "correlation_id": "corr_73aaf687a293",
+      "attempt_number": 1,
+      "timestamp": "2026-05-26T22:33:02.320210Z",
+      "source": "system",
+      "level": "info",
+      "event": "case.booking.confirmed",
+      "detail": "dealer confirmed; reminder armed for 2026-06-01T12:30:00+00:00"
+    },
+    {
+      "event_id": "evt_10c95551c1c3",
+      "case_id": "case_f8c11c1fdd89ce02",
+      "correlation_id": "corr_73aaf687a293",
+      "attempt_number": 2,
+      "timestamp": "2026-05-26T22:33:17.653891Z",
+      "source": "system",
+      "level": "info",
+      "event": "case.reminder.calling",
+      "detail": "placing reminder call (T-24h)"
+    },
+    {
+      "event_id": "evt_1e20bfe183d5",
+      "case_id": "case_f8c11c1fdd89ce02",
+      "correlation_id": "corr_73aaf687a293",
+      "attempt_number": 2,
+      "timestamp": "2026-05-26T22:33:19.512830Z",
+      "source": "sms",
+      "level": "info",
+      "event": "sms.opened",
+      "detail": "stage=reminder to=+13139095330 sid=SMa565a12c711fe0f140ab122ab3c36232"
+    }
+  ],
+  "outcome_detail": "",
+  "booked_slot_id": "slot_2026_06_02_0830",
+  "booked_slot_display": "Tuesday, June 2, 2026 - 8:30 AM",
+  "created_at": "2026-05-26T22:32:35.683127Z",
+  "closed_at": null
+}

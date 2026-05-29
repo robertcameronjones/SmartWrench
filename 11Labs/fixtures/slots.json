@@ -1,17 +1,17 @@
 [
   {
-    "id": "slot_2026_05_12_0830",
-    "starts_at": "2026-05-12T12:30:00Z",
-    "display": "Tuesday, May 12, 2026 - 8:30 AM"
+    "id": "slot_2026_06_02_0830",
+    "starts_at": "2026-06-02T12:30:00Z",
+    "display": "Tuesday, June 2, 2026 - 8:30 AM"
   },
   {
-    "id": "slot_2026_05_12_1330",
-    "starts_at": "2026-05-12T17:30:00Z",
-    "display": "Tuesday, May 12, 2026 - 1:30 PM"
+    "id": "slot_2026_06_02_1330",
+    "starts_at": "2026-06-02T17:30:00Z",
+    "display": "Tuesday, June 2, 2026 - 1:30 PM"
   },
   {
-    "id": "slot_2026_05_13_0900",
-    "starts_at": "2026-05-13T13:00:00Z",
-    "display": "Wednesday, May 13, 2026 - 9:00 AM"
+    "id": "slot_2026_06_03_0900",
+    "starts_at": "2026-06-03T13:00:00Z",
+    "display": "Wednesday, June 3, 2026 - 9:00 AM"
   }
 ]

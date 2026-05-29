@@ -132,6 +132,7 @@ def _build_test_app(
         routing=routing,
         prompt_paths=PromptPaths(
             system=_REPO_ROOT / "11Labs" / "config" / "system-prompt.md",
+            post_booking=_REPO_ROOT / "11Labs" / "config" / "prompt-post-booking.md",
             voice=_REPO_ROOT / "11Labs" / "config" / "voice.md",
             sms=_REPO_ROOT / "sms_adapter" / "config" / "sms.md",
         ),
@@ -362,7 +363,7 @@ class TestSmsInboundWebhook:
             data={
                 "From": "+13135550000",
                 "To": "+12485551234",
-                "Body": "yes please",
+                "Body": "1",
                 "MessageSid": "SMfake_inbound_001",
                 "NumMedia": "0",
             },
@@ -382,7 +383,7 @@ class TestSmsInboundWebhook:
 
         # The LLM's second invocation saw the inbound user turn in history.
         _system, second_history = fake_llm.calls[-1]
-        assert any(t.role.value == "user" and t.text == "yes please" for t in second_history)
+        assert any(t.role.value == "user" and t.text == "1" for t in second_history)
 
         # History file grew to 3 turns: opener / inbound / reply.
         # The session writes history asynchronously, so poll briefly.
@@ -390,7 +391,7 @@ class TestSmsInboundWebhook:
         turns = history.load(case_id)
         assert len(turns) == 3
         assert [t.role.value for t in turns] == ["assistant", "user", "assistant"]
-        assert turns[1].text == "yes please"
+        assert turns[1].text == "1"
         assert turns[2].text == reply_body
 
         # The reply confirmed a slot, so the session terminated and the
@@ -422,7 +423,7 @@ class TestSmsInboundWebhook:
         assert res.status_code == 200, res.text
         assert fake_twilio.sent == []  # no reply attempted
 
-    def test_stop_keyword_marks_case_declined(
+    def test_stop_keyword_marks_case_opted_out(
         self,
         client_with_sms: tuple[UserClient, SmsCallSession, RoutingStore, HistoryStore],
         fake_twilio: FakeTwilio,
@@ -463,9 +464,9 @@ class TestSmsInboundWebhook:
         # No reply should have been sent in response to STOP.
         assert len(fake_twilio.sent) == 1
 
-        # Case lands in DECLINED.
+        # Case lands in OPTED_OUT.
         case_blob = client.get(f"/api/cases/{case_id}").json()
-        assert case_blob["state"] == "declined"
+        assert case_blob["state"] == "opted_out"
 
 
 # SmsCallSession unit tests (no FastAPI) live in

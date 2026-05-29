@@ -4,31 +4,13 @@ The factory wires every dependency exactly once. Tests build a custom
 app with fakes; ``__main__`` builds the production app from real
 adapters. Either way no module reaches for a global.
 
-Per ADR 0006 the simulator hosts the same ``CaseManager`` the
-production system will run; the only thing it swaps is the
-per-channel ``CallSession`` (live ElevenLabs for voice, the in-process
-``SmsCallSession`` for SMS).
-
-The trigger source is the in-memory ``EphemeralTriggerSource`` — the
-operator composes a trigger by typing service type + summary in the
-UI, the fire route synthesizes the Trigger from saved master data,
-hands it to ``CaseManager.start``, and discards it after.
-
-Per-user data namespacing (v2)
-==============================
-User-scoped state (master data, slots, per-user CaseManager) is no
-longer constructed at app startup. A :class:`UserContextRegistry`
-lives on ``app.state.user_contexts`` and lazily builds + caches a
-per-user :class:`UserContext` on first request, seeding the user's
-directory from ``fixtures/`` if missing.
-
-Each user's :class:`CaseManager` is wired with that user's
-``master_data`` but reuses the **global** ``case_repo``,
-``trigger_source``, and ``call_sessions`` (voice + sms). That way
-customer / dealer / vehicle lookups during ``start()`` hit the
-user's namespace, while case files land in the shared ``cases/`` dir
-where the live ElevenLabs voice callback and the SMS inbound
-webhook can find them.
+Per-user data namespacing
+=========================
+A :class:`UserContextRegistry` lives on ``app.state.user_contexts`` and
+lazily builds + caches a per-user :class:`UserContext` on first request,
+seeding the user's directory from ``fixtures/`` if missing. The context
+owns only master data (customer / dealer / vehicle) and slots. Case
+execution is handled by the global ``CaseDriver`` on ``app.state``.
 
 SMS inbound webhook
 ===================
@@ -36,13 +18,18 @@ Twilio POSTs every inbound SMS to ``/sms``. The handler resolves
 ``phone -> case_id`` via the SMS routing store, then calls
 ``SmsCallSession.deliver_inbound(case_id=...)``. The session's per-case
 ``place()`` coroutine dequeues the turn, runs one LLM exchange, and
-sends the reply. Inbounds for phones with no active session are
-logged and dropped (Twilio still sees a 200 so it doesn't retry).
+sends the reply.
+
+STOP / START keywords are handled even when no session is active:
+consent is updated in master data and ``CustomerOptedOut`` /
+``CustomerOptedIn`` signals fan out to active cases via ``CaseDriver``.
 """
 
 from __future__ import annotations
 
 import os
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import structlog
@@ -52,31 +39,54 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from guidepoint.case import (
+    CaseDriver,
     CaseEvent,
     CaseId,
     CaseRepository,
     Channel,
-    JsonCasePaths,
-    RetryPolicy,
+    CustomerOptedIn,
+    CustomerOptedOut,
+    InMemoryTimerService,
     TriggerSource,
-    build_json_case_repository,
     build_live_call_session,
 )
 from guidepoint.case._call_session import CallSession
+from guidepoint.case._ports import CallManager
+from guidepoint.case._world_bridge import timer_name_to_case_signal
 from guidepoint.clock import Clock, build_system_clock
 from guidepoint.events import EventBus, build_event_bus
+from guidepoint.persistence import build_case_repository
 from sms.server import app as sms_webhook_app
 from sms.server import inbound_sms, register_inbound_handler
-from sms_adapter import RoutingStore, SmsCallSession
+from sms_adapter import (
+    RoutingStore,
+    SmsCallSession,
+    is_opt_in_keyword,
+    is_opt_out_keyword,
+    normalize_sms_body,
+)
 
 from simulator._basic_auth import BasicAuthMiddleware
 from simulator._connection import ConnectionProbe, build_env_connection_probe
+from simulator._consent import ProjectSmsConsentChecker
 from simulator._ephemeral_triggers import EphemeralTriggerSource
 from simulator._routes import (
     RouteDeps,
     build_router,
     package_static_dir,
     package_templates_dir,
+)
+from simulator._sim_ports import SimulatorDealerSlotPort, SimulatorGeofencePort
+from simulator._sim_controls import (
+    QueueHealthResponse,
+    SimulatorWorldState,
+    WorldStateResponse,
+    build_geofence_forwarder,
+    make_get_queue_health,
+    make_get_world_state,
+    make_post_case_signal,
+    make_put_business_hours,
+    make_put_geofence,
 )
 from simulator._sms_setup import build_sms_session
 from simulator._users import UserContextRegistry, UserRegistry
@@ -95,7 +105,6 @@ def build_app(
     sms_session: SmsCallSession | None = None,
     sms_routing: RoutingStore | None = None,
     probe: ConnectionProbe | None = None,
-    retry_policy: RetryPolicy | None = None,
     user_registry: UserRegistry | None = None,
 ) -> FastAPI:
     """Compose the simulator application.
@@ -114,14 +123,16 @@ def build_app(
 
     ``user_registry`` defaults to one parsed from the ``USERS`` env
     var; tests can pass a fixed allowlist.
+
+    Case persistence defaults to JSON files; set ``PERSISTENCE=sqlite``
+    to use ``data/guidepoint.db`` instead (JSON cases are migrated once
+    on first boot).
     """
     resolved_clock = clock or build_system_clock()
     resolved_bus: EventBus[CaseEvent] = bus or build_event_bus(payload_type=CaseEvent)
     resolved_probe = probe or build_env_connection_probe(clock=resolved_clock)
     resolved_user_registry = user_registry or UserRegistry(os.environ.get("USERS") or "")
-    resolved_case_repo = case_repo or build_json_case_repository(
-        paths=JsonCasePaths.for_root(project_root),
-    )
+    resolved_case_repo = case_repo or build_case_repository(project_root=project_root)
     resolved_trigger_source: TriggerSource = trigger_source or EphemeralTriggerSource()
     resolved_call_session = call_session or _build_live_call_session_from_env(
         case_repo=resolved_case_repo,
@@ -129,21 +140,69 @@ def build_app(
         clock=resolved_clock,
     )
 
-    # SMS is optional. If the caller didn't pass an explicit session +
-    # routing pair, try to build the live one from env vars. The
-    # factory returns ``(None, None)`` when required env vars are
-    # missing; the Fire route 503s on channel=sms in that state.
+    call_sessions: dict[Channel, CallSession] = {"voice": resolved_call_session}
+
+    sms_consent_checker = ProjectSmsConsentChecker(
+        project_root=project_root,
+        user_registry=resolved_user_registry,
+    )
+
+    user_contexts = UserContextRegistry(
+        project_root=project_root,
+        user_registry=resolved_user_registry,
+    )
+
     if sms_session is None and sms_routing is None:
         sms_session, sms_routing = build_sms_session(
             project_root=project_root,
             case_repo=resolved_case_repo,
             bus=resolved_bus,
             clock=resolved_clock,
+            consent_checker=sms_consent_checker,
         )
 
-    call_sessions: dict[Channel, CallSession] = {"voice": resolved_call_session}
     if sms_session is not None:
         call_sessions["sms"] = sms_session
+
+    dealer_port = SimulatorDealerSlotPort()
+    geofence_port = SimulatorGeofencePort()
+
+    driver_holder: dict[str, CaseDriver | None] = {"driver": None}
+
+    async def _timer_fire(case_id: CaseId, name: str) -> None:
+        driver = driver_holder["driver"]
+        if driver is None:
+            return
+        await driver.on_signal(
+            timer_name_to_case_signal(
+                case_id=case_id,
+                name=name,
+                timestamp=resolved_clock.now(),
+            )
+        )
+
+    timer_service = InMemoryTimerService(clock=resolved_clock, fire=_timer_fire)
+
+    call_managers: dict[Channel, CallManager] = {"voice": resolved_call_session}
+    if sms_session is not None:
+        call_managers["sms"] = sms_session
+
+    case_driver = CaseDriver(
+        case_repo=resolved_case_repo,
+        call_managers=call_managers,
+        dealer_port=dealer_port,
+        timer_service=timer_service,
+        bus=resolved_bus,
+        clock=resolved_clock,
+    )
+    driver_holder["driver"] = case_driver
+
+    world_state = SimulatorWorldState()
+    geofence_forwarder = build_geofence_forwarder(
+        case_driver=case_driver,
+        clock=resolved_clock,
+    )
+    geofence_subscribed: set = set()
 
     templates = Jinja2Templates(directory=str(package_templates_dir()))
     deps = RouteDeps(
@@ -154,54 +213,95 @@ def build_app(
         clock=resolved_clock,
         templates=templates,
         enabled_channels=frozenset(call_sessions.keys()),
+        sms_consent_checker=sms_consent_checker,
     )
 
-    user_contexts = UserContextRegistry(
-        project_root=project_root,
-        user_registry=resolved_user_registry,
-        case_repo=resolved_case_repo,
-        trigger_source=resolved_trigger_source,
-        call_sessions=call_sessions,
-        bus=resolved_bus,
-        clock=resolved_clock,
-        retry_policy=retry_policy,
-    )
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        count = await case_driver.recover_in_flight()
+        _log.info("simulator.startup.recovered", count=count)
+        yield
+        await case_driver.shutdown()
 
     app = FastAPI(
         title="Guidepoint Simulator",
         version="0.5.0",
         docs_url="/docs",
         redoc_url=None,
+        lifespan=lifespan,
     )
-    # Stash the per-user registry on app.state so the FastAPI dependency
-    # get_user_context can find it from any request. Allowed-users
-    # registry tags along for future UIs (user picker, etc.).
     app.state.user_contexts = user_contexts
     app.state.user_registry = resolved_user_registry
+    app.state.dealer_port = dealer_port
+    app.state.geofence_port = geofence_port
+    app.state.case_driver = case_driver
+    app.state.case_repo = resolved_case_repo
+    app.state.event_bus = resolved_bus
+    app.state.world_state = world_state
+    app.state.geofence_forwarder = geofence_forwarder
+    app.state.geofence_subscribed = geofence_subscribed
+    app.state.active_vehicle_vin = ""
 
-    # Browser-facing HTTP Basic Auth. Auth is required whenever USERS
-    # is set (default: "demo:demo" for local dev). Exempts /sms and
-    # /twilio/* so Twilio webhooks still work without credentials.
     app.add_middleware(BasicAuthMiddleware)
-    app.include_router(build_router(deps=deps))
+    router = build_router(deps=deps)
+    router.add_api_route(
+        "/api/world/state",
+        make_get_world_state(world=world_state, geofence_port=geofence_port),
+        response_model=WorldStateResponse,
+    )
+    router.add_api_route(
+        "/api/world/business-hours",
+        make_put_business_hours(
+            world=world_state,
+            case_driver=case_driver,
+            clock=resolved_clock,
+        ),
+        methods=["PUT"],
+        response_model=WorldStateResponse,
+    )
+    router.add_api_route(
+        "/api/world/geofence",
+        make_put_geofence(
+            geofence_port=geofence_port,
+            on_event=geofence_forwarder,
+            subscribed=geofence_subscribed,
+        ),
+        methods=["PUT"],
+        response_model=WorldStateResponse,
+    )
+    router.add_api_route(
+        "/api/cases/{case_id}/signal",
+        make_post_case_signal(
+            case_repo=resolved_case_repo,
+            case_driver=case_driver,
+            clock=resolved_clock,
+        ),
+        methods=["POST"],
+    )
+    router.add_api_route(
+        "/health/queues",
+        make_get_queue_health(case_driver=case_driver),
+        response_model=QueueHealthResponse,
+    )
+    app.include_router(router)
     app.mount(
         "/static",
         StaticFiles(directory=str(package_static_dir())),
         name="static",
     )
 
-    # Mount the webhook's debug pages at /twilio (so /twilio/messages
-    # and /twilio/health stay reachable for inspection) and ALSO expose
-    # the inbound handler at bare /sms — that's the path Twilio's
-    # console is configured for. Root-mounting the webhook app would
-    # shadow the simulator's / and /health, so we register the inbound
-    # endpoint directly here.
     app.mount("/twilio", sms_webhook_app, name="twilio")
     app.add_api_route("/sms", inbound_sms, methods=["POST"], name="twilio-inbound")
 
     if sms_session is not None and sms_routing is not None:
         register_inbound_handler(
-            _make_inbound_handler(session=sms_session, routing=sms_routing)
+            _make_inbound_handler(
+                session=sms_session,
+                routing=sms_routing,
+                case_driver=case_driver,
+                user_contexts=user_contexts,
+                clock=resolved_clock,
+            )
         )
         _log.info("simulator.sms.handler.registered")
     else:
@@ -222,18 +322,64 @@ def _make_inbound_handler(
     *,
     session: SmsCallSession,
     routing: RoutingStore,
+    case_driver: CaseDriver,
+    user_contexts: UserContextRegistry,
+    clock: Clock,
 ):
-    """Build the coroutine sms.server calls for every inbound SMS.
-
-    Looks up ``phone -> case_id`` from the routing store, then asks
-    the SMS session to enqueue the turn onto the active conversation.
-    Errors are logged and swallowed so the webhook still returns 200
-    to Twilio (Twilio retries on non-200s, which would compound a
-    transient failure).
-    """
+    """Build the coroutine sms.server calls for every inbound SMS."""
 
     async def _handler(*, from_number: str, to_number: str, body: str, message_sid: str) -> None:
+        normalized = normalize_sms_body(body)
         entry = routing.find_entry(from_number)
+        preferred_user_id = entry.user_id if entry is not None else ""
+
+        # Opt-out / opt-in: update master data first, always — regardless of
+        # whether an active session exists. This is the single write path for
+        # consent; the session check below must not intercept STOP before we get here.
+        if is_opt_out_keyword(normalized):
+            updated = user_contexts.set_opt_status_for_phone(
+                from_number,
+                "opted_out",
+                preferred_user_id=preferred_user_id,
+            )
+            await case_driver.on_signal(
+                CustomerOptedOut(timestamp=clock.now(), customer_phone=from_number)
+            )
+            _log.info(
+                "simulator.sms.inbound.opted_out",
+                phone=from_number,
+                master_data_updated=updated,
+                message_sid=message_sid,
+            )
+            # Forward STOP to an active session so it terminates with the
+            # correct "opted_out" business outcome rather than timing out.
+            if entry is not None and session.has_active(CaseId(entry.conversation_id)):
+                await session.deliver_inbound(
+                    case_id=CaseId(entry.conversation_id),
+                    from_number=from_number,
+                    body=body,
+                    message_sid=message_sid,
+                )
+            return
+
+        if is_opt_in_keyword(normalized):
+            updated = user_contexts.set_opt_status_for_phone(
+                from_number,
+                "opted_in",
+                preferred_user_id=preferred_user_id,
+            )
+            await case_driver.on_signal(
+                CustomerOptedIn(timestamp=clock.now(), customer_phone=from_number)
+            )
+            _log.info(
+                "simulator.sms.inbound.opted_in",
+                phone=from_number,
+                master_data_updated=updated,
+                message_sid=message_sid,
+            )
+            return
+
+        # Normal message: route to the active session.
         if entry is None:
             _log.warning(
                 "simulator.sms.inbound.unknown_phone",
@@ -257,10 +403,14 @@ def _make_inbound_handler(
                 error=f"{type(exc).__name__}: {exc}",
             )
             return
-        if not queued:
-            # No active session for this case_id. Common after a
-            # process restart or once a case has reached terminal
-            # state and the customer keeps texting. Log + drop.
+        if queued:
+            _log.info(
+                "simulator.sms.inbound.queued",
+                phone=from_number,
+                case_id=entry.conversation_id,
+                user_id=entry.user_id,
+            )
+        else:
             _log.info(
                 "simulator.sms.inbound.no_active_session",
                 phone=from_number,
@@ -268,7 +418,6 @@ def _make_inbound_handler(
                 user_id=entry.user_id,
                 body=body[:80],
             )
-            return
         _log.info(
             "simulator.sms.inbound.queued",
             phone=from_number,

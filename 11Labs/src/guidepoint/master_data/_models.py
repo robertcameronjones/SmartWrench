@@ -66,7 +66,7 @@ class CustomerRecord(BaseModel):
     first_name: str = Field(min_length=1)
     last_name: str = Field(min_length=1)
     phone: str = Field(min_length=7)
-    opt_status: OptStatus = "unknown"
+    opt_status: OptStatus = "opted_in"
     preferred_channel: PreferredChannel = "unknown"
     timezone: str = Field(min_length=3, default="UTC")
 
@@ -74,6 +74,16 @@ class CustomerRecord(BaseModel):
     def full_name(self) -> str:
         """First + last, recomputed on access (frozen model so safe)."""
         return f"{self.first_name} {self.last_name}"
+
+    @property
+    def sms_consent(self) -> bool:
+        """Whether outbound SMS is permitted for this customer.
+
+        Maps to ``opt_status``: only an explicit ``opted_out`` blocks
+        sends. New customers default to ``opted_in``; legacy ``unknown``
+        records are still treated as consent-not-withdrawn.
+        """
+        return self.opt_status != "opted_out"
 
 
 class DealerRecord(BaseModel):

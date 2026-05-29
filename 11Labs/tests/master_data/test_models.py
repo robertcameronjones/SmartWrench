@@ -42,10 +42,21 @@ class TestCustomerRecord:
         with pytest.raises(ValidationError):
             CustomerRecord(id=CustomerId("c"), first_name="A", last_name="B", phone="123")
 
-    def test_default_opt_status_is_unknown(self) -> None:
+    def test_default_opt_status_is_opted_in(self) -> None:
         c = CustomerRecord(id=CustomerId("c"), first_name="A", last_name="B", phone="5550000")
-        assert c.opt_status == "unknown"
+        assert c.opt_status == "opted_in"
         assert c.preferred_channel == "unknown"
+        assert c.sms_consent is True
+
+    def test_sms_consent_false_when_opted_out(self) -> None:
+        c = CustomerRecord(
+            id=CustomerId("c"),
+            first_name="A",
+            last_name="B",
+            phone="5550000",
+            opt_status="opted_out",
+        )
+        assert c.sms_consent is False
 
     def test_round_trip(self) -> None:
         c = CustomerRecord(

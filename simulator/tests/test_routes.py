@@ -48,6 +48,9 @@ class FakeBookedCallSession:
             transcript="(fake test outcome)",
         )
 
+    async def start(self, *, case: Case, stage, attempt_number: int) -> CallOutcome:
+        return await self.place(case)
+
 # All API routes are gated by per-user HTTP Basic Auth (v2 phase 1).
 # Tests use the default "demo:demo" user; UserClient sends the auth
 # header on each request.
@@ -112,6 +115,7 @@ class TestIndex:
         assert res.status_code == 200
         assert "Guidepoint" in res.text
         assert 'id="trigger-form"' in res.text
+        assert 'id="case-controls-panel"' in res.text
         assert "trigger-picker" not in res.text
         assert TEST_USER in res.text  # topbar pill renders the user id
 
@@ -223,22 +227,20 @@ class TestFireEndpoint:
 
 class TestRecentCasesApi:
     def test_lists_after_fire(self, client: UserClient) -> None:
-        # ``/api/fire`` now calls ``CaseManager.start`` which returns
-        # immediately with the case in CALLING and runs the attempt
-        # in a background task. Poll briefly until the fake call
-        # session has finished and the case lands on its terminal
-        # state, then assert.
+        # ``/api/fire`` uses ``CaseDriver.fire`` which runs the v2
+        # lifecycle asynchronously. Poll until the fake call session
+        # finishes outreach + dealer confirm.
         res = client.post(
             "/api/fire",
             json={"service_type": "maintenance", "service_summary": "oil change"},
         )
         assert res.status_code == 200
         case_id = res.json()["case_id"]
-        terminal_states = {"booked", "unreachable", "declined", "escalated"}
-        case = _wait_for_state(client, case_id, terminal_states)
+        target_states = {"initial_reminder_due", "booked", "declined", "opted_out"}
+        case = _wait_for_state(client, case_id, target_states)
         cases = client.get("/api/cases").json()
         assert len(cases) == 1
-        assert case["state"] in terminal_states
+        assert case["state"] in target_states
 
     def test_get_missing_case_404s(self, client: UserClient) -> None:
         assert client.get("/api/cases/nope").status_code == 404

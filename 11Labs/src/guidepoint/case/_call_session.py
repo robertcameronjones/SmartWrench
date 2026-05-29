@@ -41,6 +41,8 @@ from typing import Any, Protocol, final
 import structlog
 from elevenlabs.client import ElevenLabs
 
+from guidepoint.case._actions import CallStage
+from guidepoint.case._ports import CallManager
 from guidepoint.case._models import (
     BusinessOutcome,
     CallOutcome,
@@ -106,11 +108,16 @@ def build_live_call_session(
     clock: Clock,
     settings: LiveCallSessionSettings | None = None,
 ) -> CallSession:
-    """Construct the live ``CallSession``.
+    """Construct the live ``CallSession`` (v1 Protocol).
 
     Raises ``CaseError`` immediately if ``agent_id`` or
     ``phone_number_id`` are blank — fail fast at boot rather than at
     the first Fire button press.
+
+    The returned instance also satisfies the v2 ``CallManager`` Protocol;
+    callers that want the v2 type explicitly should use
+    :func:`build_voice_call_manager`, which returns the same instance
+    typed as ``CallManager``.
     """
     if not agent_id:
         raise CaseError("agent_id required (set ELEVENLABS_AGENT_ID in .env)")
@@ -126,6 +133,35 @@ def build_live_call_session(
         bus=bus,
         clock=clock,
         settings=settings or LiveCallSessionSettings(),
+    )
+
+
+def build_voice_call_manager(
+    *,
+    client: ElevenLabs,
+    agent_id: str,
+    phone_number_id: str,
+    case_repo: CaseRepository,
+    bus: _CaseEventBus,
+    clock: Clock,
+    settings: LiveCallSessionSettings | None = None,
+) -> CallManager:
+    """Construct the live ``CallManager`` (v2 Protocol) for voice.
+
+    Same underlying ``_LiveCallSession`` instance as
+    :func:`build_live_call_session`; returned typed as ``CallManager``
+    so the Phase 4 ``CaseDriver`` can wire it without a runtime cast.
+    Both Protocols are satisfied by one class — kept that way so
+    voice-side behaviour never drifts between v1 and v2 entry points.
+    """
+    return build_live_call_session(
+        client=client,
+        agent_id=agent_id,
+        phone_number_id=phone_number_id,
+        case_repo=case_repo,
+        bus=bus,
+        clock=clock,
+        settings=settings,
     )
 
 
@@ -153,11 +189,51 @@ class _LiveCallSession:
         self._settings = settings
 
     async def place(self, case: Case) -> CallOutcome:
-        attempt_number = case.attempt_count + 1
+        """v1 ``CallSession`` Protocol entry. Delegates to ``start``.
+
+        Preserves the historical attempt-number convention (``case.attempt_count
+        + 1``) so the v1 ``CaseManager`` loop sees no behavioural change. The
+        v2 ``CaseDriver`` should call ``start`` directly with an explicit
+        ``stage`` and the attempt_number recorded on the ``PlaceCall`` action.
+        """
+        return await self.start(
+            case=case,
+            stage=CallStage.OUTREACH,
+            attempt_number=case.attempt_count + 1,
+        )
+
+    async def start(
+        self,
+        *,
+        case: Case,
+        stage: CallStage,
+        attempt_number: int,
+    ) -> CallOutcome:
+        """v2 ``CallManager`` Protocol entry. Place one voice call for ``case``.
+
+        ``stage`` is recorded on every log line and the per-call ``CaseEvent``
+        audit trail. The Phase 5 cut keeps the conversation behaviour
+        identical across stages — the ElevenLabs agent still runs the single
+        configured outreach prompt. Phase 7 wires per-stage prompt selection
+        into ``prompt_composer``; the parameter is plumbed now so that work
+        becomes a pure-data change with no driver impact.
+        """
         started_at = self._clock.now()
+        _log.info(
+            "voice_call_manager.start",
+            case_id=case.case_id,
+            correlation_id=case.correlation_id,
+            stage=stage.value,
+            attempt_number=attempt_number,
+            to=case.customer.phone,
+        )
 
         await self._emit(
-            case, attempt_number, "call.dialing", case.customer.phone, "system"
+            case,
+            attempt_number,
+            "call.dialing",
+            f"stage={stage.value} to={case.customer.phone}",
+            "system",
         )
 
         try:
@@ -175,8 +251,15 @@ class _LiveCallSession:
                 case,
                 attempt_number,
                 "call.placement_failed",
-                f"{type(exc).__name__}: {exc}",
+                f"stage={stage.value} {type(exc).__name__}: {exc}",
                 "elevenlabs",
+            )
+            _log.exception(
+                "voice_call_manager.outbound_call.failed",
+                case_id=case.case_id,
+                stage=stage.value,
+                attempt_number=attempt_number,
+                error=str(exc),
             )
             raise CaseError(f"ElevenLabs outbound_call failed: {exc}") from exc
 
@@ -190,8 +273,15 @@ class _LiveCallSession:
             case,
             attempt_number,
             "call.placed",
-            f"conversation_id={conversation_id}",
+            f"stage={stage.value} conversation_id={conversation_id}",
             "elevenlabs",
+        )
+        _log.info(
+            "voice_call_manager.placed",
+            case_id=case.case_id,
+            stage=stage.value,
+            attempt_number=attempt_number,
+            conversation_id=conversation_id,
         )
 
         conversation = await self._poll_until_terminal(conversation_id)
@@ -203,7 +293,7 @@ class _LiveCallSession:
             started_at=started_at,
             ended_at=ended_at,
         )
-        return await ingest_post_call_report(
+        outcome = await ingest_post_call_report(
             case=case,
             attempt_number=attempt_number,
             report=report,
@@ -211,6 +301,17 @@ class _LiveCallSession:
             bus=self._bus,
             clock=self._clock,
         )
+        _log.info(
+            "voice_call_manager.completed",
+            case_id=case.case_id,
+            stage=stage.value,
+            attempt_number=attempt_number,
+            conversation_id=conversation_id,
+            duration_seconds=outcome.duration_seconds,
+            business_outcome=outcome.business_outcome,
+            result=outcome.result,
+        )
+        return outcome
 
     async def _poll_until_terminal(self, conversation_id: str) -> Any:
         """Poll until status is ``done`` or ``failed``, bounded by max_wait_seconds."""
@@ -295,7 +396,9 @@ def _conversation_to_report(
 ) -> PostCallReport:
     raw_status = _extract_status(conversation)
     status: PostCallStatus = "done" if raw_status == "done" else "failed"
-    business_outcome, booked_slot_id = _extract_business_outcome(conversation)
+    business_outcome, booked_slot_id, booked_slot_display = _extract_business_outcome(
+        conversation
+    )
     return PostCallReport(
         elevenlabs_conversation_id=conversation_id,
         status=status,
@@ -305,6 +408,7 @@ def _conversation_to_report(
         transcript=_extract_transcript(conversation),
         business_outcome=business_outcome,
         booked_slot_id=booked_slot_id,
+        booked_slot_display=booked_slot_display,
         recording_url=str(getattr(conversation, "audio_url", "") or ""),
         error_detail="" if status == "done" else f"call ended with status={raw_status}",
     )
@@ -332,7 +436,7 @@ def _extract_transcript(conversation: Any) -> tuple[TranscriptTurn, ...]:
 
 def _extract_business_outcome(
     conversation: Any,
-) -> tuple[BusinessOutcome, SlotId | None]:
+) -> tuple[BusinessOutcome, SlotId | None, str]:
     """Read scheduled_date + scheduled_time from data_collection_results.
 
     Kate's agent has two configured data-collection fields:
@@ -343,17 +447,44 @@ def _extract_business_outcome(
     (e.g. the call ended early, the agent errored, the customer
     declined). Treating a present-but-empty wrapper as "booked" was
     case ``case_c514b77a212d2999`` — don't repeat that.
+
+    Returns ``(business_outcome, booked_slot_id, booked_slot_display)``.
+    The display string is what post-booking prompts expose to the LLM;
+    the id is for the state machine / dealer port.
     """
     analysis = getattr(conversation, "analysis", None)
     if analysis is None:
-        return "inconclusive", None
+        return "inconclusive", None, ""
     data = getattr(analysis, "data_collection_results", None) or {}
     scheduled_date = _data_collection_value(data, "scheduled_date")
     scheduled_time = _data_collection_value(data, "scheduled_time")
     if scheduled_date and scheduled_time:
         normalized = f"{scheduled_date}_{scheduled_time}".replace("-", "").replace(":", "")
-        return "booked", SlotId(f"slot_chosen_{normalized}")
-    return "inconclusive", None
+        return (
+            "booked",
+            SlotId(f"slot_chosen_{normalized}"),
+            _format_scheduled_display(scheduled_date, scheduled_time),
+        )
+    return "inconclusive", None, ""
+
+
+def _format_scheduled_display(date: str, time: str) -> str:
+    """Customer-facing label from ElevenLabs date/time collection fields."""
+
+    d = date.replace("-", "")
+    if len(d) == 8:
+        date_part = f"{d[4:6]}/{d[6:8]}/{d[:4]}"
+    else:
+        date_part = date
+    t = time.replace(":", "")
+    if len(t) >= 4:
+        hour, minute = int(t[:2]), int(t[2:4])
+        suffix = "AM" if hour < 12 else "PM"
+        hour12 = hour % 12 or 12
+        time_part = f"{hour12}:{minute:02d} {suffix}"
+    else:
+        time_part = time
+    return f"{date_part} at {time_part}"
 
 
 def _data_collection_value(data: Any, key: str) -> str | None:
@@ -413,4 +544,5 @@ __all__ = [
     "CallSession",
     "LiveCallSessionSettings",
     "build_live_call_session",
+    "build_voice_call_manager",
 ]

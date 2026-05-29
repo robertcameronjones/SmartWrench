@@ -25,9 +25,36 @@ const state = {
   vehicle: null,
   slots: [],
   activeCaseId: null,
+  activeCase: null,
   ws: null,
   caseState: "idle",
+  world: { business_hours_open: true, at_dealer: false, vehicle_vin: "" },
+  channelLocked: false,
 };
+
+// Event buttons that are always clickable whenever an active case exists.
+// The reducer is the source of truth for whether a given signal is a no-op
+// from the current state; the UI doesn't second-guess it.
+const ALWAYS_ON_EVENT_SIGNALS = new Set(["end_of_business_day_reached"]);
+
+// Case states before the initial (T-24h) reminder has been sent.
+const INITIAL_REMINDER_PENDING = new Set([
+  "created",
+  "contacting_customer",
+  "slot_proposed",
+  "slot_picked",
+  "confirming_with_dealer",
+  "initial_reminder_due",
+  "booked",
+]);
+
+// Case states before the final (day-of) reminder has been sent.
+const FINAL_REMINDER_PENDING = new Set([
+  ...INITIAL_REMINDER_PENDING,
+  "initial_reminder_sent",
+  "rescheduling",
+  "final_reminder_due",
+]);
 
 // ---------- utilities ----------------------------------------------------
 
@@ -66,6 +93,7 @@ function escapeHtml(s) {
 
 function paintForm(entity, obj) {
   state[entity] = obj;
+  if (entity === "customer") updateOptOutBadge();
   const form = document.querySelector(`[data-form="${entity}"]`);
   if (!form || !obj) return;
   form.querySelectorAll("[data-path]").forEach((el) => {
@@ -221,9 +249,154 @@ async function fireTrigger() {
     $("#status-last").textContent = `${out.case_id} @ ${fmtTime(out.accepted_at)}`;
     addLogLocal("info", "fire.accepted",
       `${channel} ${out.case_id} corr=${out.correlation_id}`);
+    lockChannelPicker();
+    showCaseControls();
+    await refreshActiveCase();
+    await refreshWorldState();
   } finally {
     setTimeout(() => { btn.disabled = false; }, 800);
   }
+}
+
+function lockChannelPicker() {
+  state.channelLocked = true;
+  const wrap = document.querySelector(".channel-radios");
+  if (wrap) wrap.classList.add("is-locked");
+}
+
+function showCaseControls() {
+  const panel = $("#case-controls-panel");
+  if (panel) panel.hidden = false;
+  paintTimeSliders();
+}
+
+async function refreshActiveCase() {
+  if (!state.activeCaseId) return;
+  const res = await fetch(`/api/cases/${encodeURIComponent(state.activeCaseId)}`);
+  if (!res.ok) return;
+  state.activeCase = await res.json();
+  setCaseState(state.activeCase.state);
+  updateOptOutBadge();
+  updateEventButtons();
+  paintTimeSliders();
+}
+
+async function refreshWorldState() {
+  const res = await fetch("/api/world/state");
+  if (!res.ok) return;
+  state.world = await res.json();
+  paintWorldSliders();
+}
+
+function paintWorldSliders() {
+  paintSegGroup("seg-business-hours", state.world.business_hours_open ? "open" : "closed");
+  paintSegGroup("seg-geofence", state.world.at_dealer ? "at_dealer" : "away");
+  paintTimeSliders();
+}
+
+function paintTimeSliders() {
+  const hasCase = Boolean(state.activeCaseId);
+  paintSegGroup("seg-initial-reminder", "before");
+  paintSegGroup("seg-final-reminder", "before");
+  ["seg-initial-reminder", "seg-final-reminder"].forEach((groupId) => {
+    const group = document.getElementById(groupId);
+    if (!group) return;
+    group.querySelectorAll(".seg-btn").forEach((btn) => {
+      btn.disabled = !hasCase;
+      btn.classList.toggle("is-disabled", !hasCase);
+    });
+  });
+}
+
+function paintSegGroup(groupId, activeValue) {
+  const group = document.getElementById(groupId);
+  if (!group) return;
+  group.querySelectorAll(".seg-btn").forEach((btn) => {
+    btn.classList.toggle("is-active", btn.dataset.value === activeValue);
+  });
+}
+
+function updateOptOutBadge() {
+  const badge = $("#optout-badge");
+  if (!badge) return;
+  // Master data is the source of truth for whether SMS is allowed.
+  // A prior case ending in opted_out must not block the next fire.
+  const optedOut = state.customer && state.customer.opt_status === "opted_out";
+  badge.hidden = !optedOut;
+}
+
+function updateEventButtons() {
+  const hasCase = Boolean(state.activeCaseId);
+  $$(".event-btn").forEach((btn) => {
+    const enabled = hasCase && ALWAYS_ON_EVENT_SIGNALS.has(btn.dataset.signal);
+    btn.disabled = !enabled;
+    btn.classList.toggle("is-disabled", !enabled);
+  });
+}
+
+async function putBusinessHours(open) {
+  const res = await fetch("/api/world/business-hours", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ open }),
+  });
+  if (!res.ok) {
+    addLogLocal("error", "world.business_hours.failed", `${res.status}`);
+    return;
+  }
+  state.world = await res.json();
+  paintWorldSliders();
+  addLogLocal("info", "world.business_hours", open ? "open" : "closed");
+}
+
+async function putGeofence(atDealer) {
+  const vin = (state.vehicle && state.vehicle.vin) || state.world.vehicle_vin;
+  if (!vin) {
+    addLogLocal("warn", "world.geofence.blocked", "no vehicle loaded");
+    return;
+  }
+  const res = await fetch("/api/world/geofence", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ vehicle_vin: vin, at_dealer: atDealer }),
+  });
+  if (!res.ok) {
+    addLogLocal("error", "world.geofence.failed", `${res.status}`);
+    return;
+  }
+  state.world = await res.json();
+  paintWorldSliders();
+  addLogLocal("info", "world.geofence", atDealer ? "at_dealer" : "away");
+}
+
+async function sendCaseSignal(signalType) {
+  if (!state.activeCaseId) return;
+  const res = await fetch(
+    `/api/cases/${encodeURIComponent(state.activeCaseId)}/signal`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ signal_type: signalType }),
+    },
+  );
+  if (!res.ok) {
+    addLogLocal("error", "case.signal.failed", `${res.status} ${await res.text()}`);
+    return;
+  }
+  addLogLocal("info", "case.signal.sent", signalType);
+  setTimeout(refreshActiveCase, 150);
+}
+
+async function advanceTimeSlider(kind, value) {
+  if (!state.activeCaseId) {
+    addLogLocal("warn", "time.slider.blocked", "fire a case first");
+    return;
+  }
+  if (value !== "due") return;
+  const signalType = kind === "initial-reminder"
+    ? "initial_reminder_due"
+    : "final_reminder_due";
+  await sendCaseSignal(signalType);
 }
 
 // ---------- log feed -----------------------------------------------------
@@ -286,6 +459,9 @@ function connectWebSocket() {
     appendLogRow(payload);
     if (typeof payload.event === "string" && payload.event.startsWith("case.")) {
       setCaseState(payload.event.slice("case.".length));
+      if (state.activeCaseId) {
+        setTimeout(refreshActiveCase, 100);
+      }
     }
   };
 }
@@ -336,15 +512,45 @@ function init() {
 
   document.querySelectorAll('input[name="trig-channel"]').forEach((r) => {
     r.addEventListener("change", () => {
+      if (state.channelLocked) return;
       const el = $("#status-channel-text");
       if (el) el.textContent = getSelectedChannel();
     });
   });
 
-  loadMasterData();
+  document.querySelectorAll("[data-world]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const kind = btn.dataset.world;
+      const value = btn.dataset.value;
+      if (kind === "business-hours") {
+        putBusinessHours(value === "open");
+      } else if (kind === "geofence") {
+        putGeofence(value === "at_dealer");
+      }
+    });
+  });
+
+  document.querySelectorAll("[data-time]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      if (btn.disabled) return;
+      paintSegGroup(`seg-${btn.dataset.time}`, btn.dataset.value);
+      advanceTimeSlider(btn.dataset.time, btn.dataset.value);
+    });
+  });
+
+  $$(".event-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      sendCaseSignal(btn.dataset.signal);
+    });
+  });
+
+  loadMasterData().then(refreshWorldState);
   connectWebSocket();
   refreshConnection();
   setInterval(refreshConnection, 15000);
+  setInterval(() => {
+    if (state.activeCaseId) refreshActiveCase();
+  }, 3000);
   setCaseState("idle");
 }
 

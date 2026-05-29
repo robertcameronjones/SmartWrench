@@ -13,7 +13,6 @@ browser interactions: master-data snapshot, fire request, status pings.
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -24,6 +23,7 @@ from guidepoint.case import (
     ServiceReasonType,
     TriggerId,
 )
+from guidepoint.clock import UtcDatetime
 from guidepoint.master_data import (
     CustomerRecord,
     DealerRecord,
@@ -60,7 +60,7 @@ class FireResponse(BaseModel):
 
     case_id: CaseId
     correlation_id: str = Field(min_length=1)
-    accepted_at: datetime
+    accepted_at: UtcDatetime
 
 
 class CaseSummary(BaseModel):
@@ -72,8 +72,8 @@ class CaseSummary(BaseModel):
     trigger_id: TriggerId
     customer_full_name: str = Field(min_length=1)
     state: str = Field(min_length=1)
-    created_at: datetime
-    closed_at: datetime | None = None
+    created_at: UtcDatetime
+    closed_at: UtcDatetime | None = None
 
 
 class ConnectionStatus(BaseModel):
@@ -84,7 +84,7 @@ class ConnectionStatus(BaseModel):
     api_key_present: bool
     agent_id_present: bool
     agent_id: str = ""
-    last_checked: datetime
+    last_checked: UtcDatetime
     healthy: bool
     detail: str = ""
 

@@ -283,7 +283,7 @@
 
 <h2>The main path — what a happy case looks like</h2>
 
-<div class="flow">
+<div class="flow" style="grid-template-columns: repeat(7, 1fr);">
   <div class="step">
     <div class="num">STEP 1</div>
     <div class="name">Contact</div>
@@ -297,27 +297,43 @@
   <div class="step">
     <div class="num">STEP 3</div>
     <div class="name">Confirm</div>
-    <div class="desc">Kate repeats the slot back; customer confirms.</div>
+    <div class="desc">Kate repeats the slot back; customer confirms; dealer confirms availability.</div>
   </div>
   <div class="step">
     <div class="num">STEP 4</div>
-    <div class="name">Remind</div>
-    <div class="desc">24 hours before the appointment, Kate texts a reminder. Customer can confirm, cancel, or reschedule.</div>
+    <div class="name">Initial reminder</div>
+    <div class="desc">24 hours before the appointment, Kate texts a reminder. Customer can confirm, reschedule, cancel, or stay silent.</div>
   </div>
   <div class="step">
     <div class="num">STEP 5</div>
-    <div class="name">Arrive</div>
-    <div class="desc">Day of: Guidepoint's GPS confirms arrival at the dealership. Up until the appointment time, customer can still text in to reschedule.</div>
+    <div class="name">Final reminder</div>
+    <div class="desc">Day of (a couple of hours before the slot), Kate texts again with the same four options — even if the initial reminder went unanswered.</div>
   </div>
   <div class="step">
     <div class="num">STEP 6</div>
+    <div class="name">Arrive</div>
+    <div class="desc">Guidepoint's GPS confirms arrival at the dealership. Customer can still text in to reschedule right up to the appointment.</div>
+  </div>
+  <div class="step">
+    <div class="num">STEP 7</div>
     <div class="name">Feedback</div>
     <div class="desc">After the appointment, Kate texts to ask how it went.</div>
   </div>
 </div>
-<div class="arrow-row">
-  <span>→</span><span>→</span><span>→</span><span>→</span><span>→</span><span>✓</span>
+<div class="arrow-row" style="grid-template-columns: repeat(7, 1fr);">
+  <span>→</span><span>→</span><span>→</span><span>→</span><span>→</span><span>→</span><span>✓</span>
 </div>
+
+<p style="margin-top:14px; color: var(--ink-soft); font-size: 14px;">
+  Each reminder has the same four customer outcomes — <strong>confirm</strong>,
+  <strong>reschedule</strong>, <strong>cancel</strong>, <strong>no response</strong>.
+  Confirming or staying silent at the initial reminder doesn't advance or close
+  the case — Kate acknowledges warmly and the final reminder still fires on the
+  day of the appointment. Only <strong>cancel</strong> or <strong>reschedule</strong>
+  at either reminder ends or restarts the case immediately. The final outcome
+  (showed / no-show / completed) is decided by the geofence and end-of-business-day,
+  not by the customer's replies to the reminders.
+</p>
 
 <h2>How a case can end</h2>
 <div class="outcomes">
@@ -339,11 +355,11 @@
   </div>
   <div class="outcome maybe">
     <h3><span class="badge maybe">Reschedule</span>Customer wants a different time</h3>
-    <p>At the reminder, or any time before the appointment, the customer can ask to move it. We pick a new slot under the <strong>same case</strong> and reset the reminder for the new date.</p>
+    <p>At either reminder, or any time before the appointment, the customer can ask to move it. We pick a new slot under the <strong>same case</strong> and reset both reminders for the new date.</p>
   </div>
   <div class="outcome warn">
     <h3><span class="badge warn">Cancelled</span>Customer cancels the appointment</h3>
-    <p>If the customer cancels outright (not a reschedule), we treat it as a decline and close the case.</p>
+    <p>If the customer cancels outright at either reminder (not a reschedule), we treat it as a decline and close the case.</p>
   </div>
   <div class="outcome bad">
     <h3><span class="badge bad">No-show</span>Vehicle didn't arrive</h3>
@@ -375,7 +391,8 @@
     <tr><td>Trigger</td><td>Case opens; Kate reaches out within minutes.</td></tr>
     <tr><td>+24 hours of silence</td><td>One nudge.</td></tr>
     <tr><td>+48 hours of silence</td><td>Case closes (timed out).</td></tr>
-    <tr><td>24 hours before appointment</td><td>Reminder sent.</td></tr>
+    <tr><td>24 hours before appointment</td><td><strong>Initial reminder</strong> sent. (Skipped if the booking was made inside this window.)</td></tr>
+    <tr><td>~2 hours before appointment</td><td><strong>Final reminder</strong> sent — even if the initial reminder went unanswered.</td></tr>
     <tr><td>Appointment day</td><td>GPS confirms arrival (or absence) at the dealership.</td></tr>
     <tr><td>After appointment</td><td>Feedback ask. One nudge after 24 hours, then close.</td></tr>
   </tbody>

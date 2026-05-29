@@ -22,6 +22,12 @@ from typing import Protocol, final
 
 import structlog
 
+# Per-subscriber bounded queue. The bus prefers dropping events on
+# slow subscribers over blocking publishers (or worse, blocking the
+# whole bus). When a queue fills, ``publish`` emits a structured
+# ``queue.overflow.event_bus`` warning so log scrapes can catch
+# slow-consumer regressions consistently with other queue overflows
+# in the system.
 _QUEUE_MAX = 256
 _log = structlog.get_logger(__name__)
 
@@ -35,6 +41,16 @@ class EventBus[T](Protocol):
 
     def subscribe(self) -> AsyncIterator[T]:
         """Async-iterate events until the consumer stops awaiting."""
+        ...
+
+    def subscriber_depths(self) -> tuple[tuple[int, int], ...]:
+        """Snapshot of every active subscriber's queue depth.
+
+        Returns a tuple of ``(current_depth, max_depth)`` pairs, one
+        per live subscriber. Intended for a health / debug endpoint so
+        operators can spot a slow consumer before it starts dropping
+        events. Synchronous and non-blocking.
+        """
         ...
 
 
@@ -65,7 +81,12 @@ class _InProcessBus[T]:
             try:
                 queue.put_nowait(event)
             except asyncio.QueueFull:
-                _log.warning("events.bus.dropped", payload_type=type(event).__name__)
+                _log.warning(
+                    "queue.overflow.event_bus",
+                    payload_type=type(event).__name__,
+                    current_depth=queue.qsize(),
+                    max_depth=_QUEUE_MAX,
+                )
 
     def subscribe(self) -> AsyncIterator[T]:
         return self._iterate()
@@ -88,6 +109,13 @@ class _InProcessBus[T]:
         finally:
             async with self._lock:
                 self._subscribers.discard(queue)
+
+    def subscriber_depths(self) -> tuple[tuple[int, int], ...]:
+        # Snapshot is read without the lock: ``set`` iteration in
+        # CPython is safe for read-only access against put/remove from
+        # other tasks (we accept a possibly-stale snapshot — the cost
+        # of taking the lock here is not worth the freshness).
+        return tuple((q.qsize(), _QUEUE_MAX) for q in self._subscribers)
 
 
 __all__ = ["EventBus", "build_event_bus"]

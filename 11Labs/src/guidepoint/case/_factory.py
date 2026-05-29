@@ -70,7 +70,7 @@ def create_case_from_trigger(
         vehicle=vehicle,
         service_event=trigger.service_event,
         offered_slots=trigger.offered_slots,
-        channel=trigger.channel_preference,
+        initial_channel=trigger.channel_preference,
         user_id=trigger.user_id,
         state=CaseState.CREATED,
         attempt_count=0,
@@ -79,6 +79,7 @@ def create_case_from_trigger(
         events=(),
         outcome_detail="",
         booked_slot_id=None,
+        booked_slot_display="",
         created_at=clock.now(),
         closed_at=None,
     )

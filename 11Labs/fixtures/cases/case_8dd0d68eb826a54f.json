@@ -1,0 +1,115 @@
+{
+  "case_id": "case_8dd0d68eb826a54f",
+  "trigger_id": "trig_8d2e142c5e77",
+  "correlation_id": "corr_468e94387176",
+  "customer": {
+    "id": "cust_jones_robert",
+    "first_name": "Robert",
+    "last_name": "Jones",
+    "phone": "+13139095330",
+    "opt_status": "opted_in",
+    "preferred_channel": "voice",
+    "timezone": "America/Detroit"
+  },
+  "dealer": {
+    "id": "dealer_village_jeep_royal_oak",
+    "name": "Village Jeep",
+    "phone": "+12487813798",
+    "address": "31200 Woodward Ave, Royal Oak, MI 48073",
+    "ride_radius_miles": 10
+  },
+  "vehicle": {
+    "vin": "1C4RJFBG5NC123456",
+    "owner_id": "cust_jones_robert",
+    "year": 2026,
+    "make": "Jeep",
+    "model": "Grand Cherokee",
+    "odometer_miles": 32180,
+    "current_location": {
+      "latitude": 42.4895,
+      "longitude": -83.1446,
+      "description": "Owner's home, driveway"
+    }
+  },
+  "service_event": {
+    "type": "maintenance",
+    "summary": "oil change and tire rotation",
+    "narrative": ""
+  },
+  "offered_slots": [
+    {
+      "id": "slot_2026_06_02_0830",
+      "starts_at": "2026-06-02T12:30:00Z",
+      "display": "Tuesday, June 2, 2026 - 8:30 AM"
+    },
+    {
+      "id": "slot_2026_06_02_1330",
+      "starts_at": "2026-06-02T17:30:00Z",
+      "display": "Tuesday, June 2, 2026 - 1:30 PM"
+    },
+    {
+      "id": "slot_2026_06_03_0900",
+      "starts_at": "2026-06-03T13:00:00Z",
+      "display": "Wednesday, June 3, 2026 - 9:00 AM"
+    }
+  ],
+  "initial_channel": "sms",
+  "user_id": "demo",
+  "state": "contacting_customer",
+  "attempt_count": 1,
+  "next_attempt_at": null,
+  "reschedule_count": 0,
+  "context_notes": "",
+  "call_attempts": [],
+  "events": [
+    {
+      "event_id": "evt_4eff8f59debc",
+      "case_id": "case_8dd0d68eb826a54f",
+      "correlation_id": "corr_468e94387176",
+      "attempt_number": 1,
+      "timestamp": "2026-05-26T15:40:31.403982Z",
+      "source": "system",
+      "level": "info",
+      "event": "case.outreach.started",
+      "detail": "business hours opened — placing initial outreach call"
+    },
+    {
+      "event_id": "evt_2134ba3fcc54",
+      "case_id": "case_8dd0d68eb826a54f",
+      "correlation_id": "corr_468e94387176",
+      "attempt_number": 1,
+      "timestamp": "2026-05-26T15:40:34.068401Z",
+      "source": "sms",
+      "level": "info",
+      "event": "sms.opened",
+      "detail": "stage=outreach to=+13139095330 sid=SM88f23190b50a6b97b8b8bb1070e46374"
+    },
+    {
+      "event_id": "evt_bb4bafff77fb",
+      "case_id": "case_8dd0d68eb826a54f",
+      "correlation_id": "corr_468e94387176",
+      "attempt_number": 1,
+      "timestamp": "2026-05-26T16:17:54.005097Z",
+      "source": "sms",
+      "level": "info",
+      "event": "sms.inbound",
+      "detail": "from=+13139095330 body='Yes'"
+    },
+    {
+      "event_id": "evt_776f1903fe9c",
+      "case_id": "case_8dd0d68eb826a54f",
+      "correlation_id": "corr_468e94387176",
+      "attempt_number": 1,
+      "timestamp": "2026-05-26T16:17:56.763908Z",
+      "source": "sms",
+      "level": "info",
+      "event": "sms.outbound",
+      "detail": "sid=SM7b322d2c13e99cba217ef8fe81b2aef6 body='Great! Here are the available times:  1. Tuesday, June 2, 2026 at 8:30 AM 2. Tuesday, June 2, 2026 at 1:30 PM 3. Wednesday, June 3, 2026 at 9:00 AM 4. None of …'"
+    }
+  ],
+  "outcome_detail": "",
+  "booked_slot_id": null,
+  "booked_slot_display": "",
+  "created_at": "2026-05-26T15:40:31.394588Z",
+  "closed_at": null
+}

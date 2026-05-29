@@ -1,0 +1,814 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Guidepoint Maintenance 2.0 — v2 Future State</title>
+<style>
+  :root {
+    --ink: #0f172a;
+    --ink-soft: #475569;
+    --line: #e2e8f0;
+    --bg: #ffffff;
+    --bg-soft: #f8fafc;
+    --bg-code: #0f172a;
+    --code-ink: #e2e8f0;
+    --accent: #1d4ed8;
+    --good: #15803d;
+    --warn: #b45309;
+    --bad: #b91c1c;
+    --maybe: #6d28d9;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  }
+  main {
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 48px 32px 72px;
+  }
+  header {
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 24px;
+    margin-bottom: 32px;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+  }
+  .logo { flex: 0 0 auto; height: 56px; display: inline-flex; align-items: center; }
+  .logo img { height: 100%; width: auto; display: block; }
+  .header-text { flex: 1; }
+  h1 {
+    font-size: 28px; margin: 0 0 6px;
+    letter-spacing: -0.01em;
+  }
+  .eyebrow {
+    font-size: 11px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.12em;
+    color: var(--accent); margin: 0 0 4px;
+  }
+  .subtitle { color: var(--ink-soft); margin: 0; font-size: 14px; }
+  h2 {
+    font-size: 20px;
+    margin: 44px 0 14px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--line);
+    letter-spacing: -0.005em;
+  }
+  h3 {
+    font-size: 15px;
+    margin: 24px 0 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--ink-soft);
+  }
+  p { margin: 0 0 12px; }
+  ul, ol { margin: 0 0 14px 20px; padding: 0; }
+  li { margin-bottom: 4px; }
+  .lede {
+    font-size: 16px;
+    color: var(--ink-soft);
+    border-left: 3px solid var(--accent);
+    padding: 4px 0 4px 16px;
+    margin: 0 0 24px;
+  }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 12px 0 20px;
+    font-size: 14px;
+  }
+  th, td {
+    text-align: left;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+  }
+  th {
+    background: var(--bg-soft);
+    font-weight: 600;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--ink-soft);
+  }
+  code, kbd, samp {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.9em;
+    background: var(--bg-soft);
+    padding: 1px 5px;
+    border-radius: 3px;
+    border: 1px solid var(--line);
+  }
+  pre {
+    background: var(--bg-code);
+    color: var(--code-ink);
+    padding: 14px 16px;
+    border-radius: 6px;
+    overflow-x: auto;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 13px;
+    line-height: 1.5;
+    margin: 0 0 20px;
+  }
+  pre code { background: transparent; border: 0; padding: 0; color: inherit; }
+  .pill {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    background: var(--bg-soft);
+    border: 1px solid var(--line);
+    color: var(--ink-soft);
+  }
+  .pill.good { color: var(--good); border-color: #bbf7d0; background: #f0fdf4; }
+  .pill.warn { color: var(--warn); border-color: #fde68a; background: #fffbeb; }
+  .pill.bad  { color: var(--bad);  border-color: #fecaca; background: #fef2f2; }
+  .pill.maybe{ color: var(--maybe);border-color: #ddd6fe; background: #f5f3ff; }
+  .pill.accent{color: var(--accent);border-color:#bfdbfe; background:#eff6ff; }
+
+  .grid-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin: 0 0 20px;
+  }
+  .card {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 16px 18px;
+    background: var(--bg-soft);
+  }
+  .card h4 {
+    margin: 0 0 8px;
+    font-size: 14px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--accent);
+  }
+  .card .role {
+    font-size: 12px;
+    color: var(--ink-soft);
+    margin-bottom: 8px;
+  }
+  .card ul { margin-left: 18px; }
+
+  /* org chart tree */
+  .tree {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 13px;
+    line-height: 1.7;
+    background: var(--bg-soft);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 16px 20px;
+    white-space: pre;
+    overflow-x: auto;
+    color: var(--ink);
+  }
+  .tree .dim { color: var(--ink-soft); font-style: italic; }
+  .tree .new { color: var(--good); font-weight: 600; }
+  .tree .modify { color: var(--accent); font-weight: 600; }
+  .tree .pkg { color: var(--maybe); font-weight: 600; }
+  .tree .delete { color: var(--bad); text-decoration: line-through; }
+
+  /* mermaid container */
+  .mermaid {
+    background: var(--bg-soft);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 18px;
+    margin: 12px 0 20px;
+    text-align: center;
+  }
+
+  /* legend */
+  .legend {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin: 6px 0 18px;
+    font-size: 12px;
+    color: var(--ink-soft);
+  }
+  .legend .swatch {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .swatch::before {
+    content: '';
+    width: 10px; height: 10px;
+    border-radius: 2px;
+    display: inline-block;
+  }
+  .swatch.green::before { background: var(--good); }
+  .swatch.blue::before { background: var(--accent); }
+  .swatch.purple::before { background: var(--maybe); }
+  .swatch.red::before { background: var(--bad); }
+  .swatch.gray::before { background: var(--ink-soft); }
+
+  hr.thin {
+    border: 0;
+    border-top: 1px solid var(--line);
+    margin: 32px 0;
+  }
+  footer {
+    margin-top: 56px;
+    padding-top: 20px;
+    border-top: 1px solid var(--line);
+    font-size: 12px;
+    color: var(--ink-soft);
+  }
+</style>
+</head>
+<body>
+<main>
+
+<header>
+  <div class="logo"><img src="logo.png" alt="Guidepoint" /></div>
+  <div class="header-text">
+    <p class="eyebrow">Internal · Engineering plan brief</p>
+    <h1>Guidepoint Maintenance — v2 Future State</h1>
+    <p class="subtitle">The case lifecycle, the architecture, and the code layout we're building toward.</p>
+  </div>
+</header>
+
+<p class="lede">
+  v2 takes the unified case-lifecycle foundation from v1 (SMS through the same <code>CaseManager</code> as voice) and grows it into the full maintenance flow: trigger → outreach → dealer confirmation → booking → reminder → day-of → service → feedback → close. It does this with <strong>two distinct state machines</strong>, each with its own owner, behind <strong>one published Protocol surface</strong> between them.
+</p>
+
+<h2>What changes between v1 and v2</h2>
+
+<table>
+  <thead>
+    <tr>
+      <th>Concern</th>
+      <th>v1 (today)</th>
+      <th>v2 (target)</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Case stages</td>
+      <td>Initial outreach only (booked / declined / unreachable).</td>
+      <td>Full lifecycle through service event + feedback.</td>
+    </tr>
+    <tr>
+      <td>Dealer confirmation</td>
+      <td>Implicit (operator simulates).</td>
+      <td><code>DealerSlotPort</code>: list slots, confirm slot. Sim binding now, partner tool at go-live.</td>
+    </tr>
+    <tr>
+      <td>Reminder / day-of / feedback</td>
+      <td>Not modeled.</td>
+      <td>Driven by event signals (T-24h, day-of, geofence in/out).</td>
+    </tr>
+    <tr>
+      <td>Show / no-show detection</td>
+      <td>Not modeled.</td>
+      <td><code>GeofencePort</code>: vehicle entered / exited dealer.</td>
+    </tr>
+    <tr>
+      <td>State-machine ownership</td>
+      <td>One <code>CaseManager</code>, one fat <code>CallSession.place()</code>.</td>
+      <td>Two machines. While a call is live, the <strong>CallManager</strong> has exclusive ownership and actively advances per-call state. The <strong>CaseManager</strong> is the system of record: it owns durable case state across calls and records each call's outcome when control returns.</td>
+    </tr>
+    <tr>
+      <td>SMS opt-out</td>
+      <td>STOP detected per case only.</td>
+      <td>Per-customer <code>sms_consent</code>; <code>OPTED_OUT</code> terminal; gated outbound.</td>
+    </tr>
+    <tr>
+      <td>Persistence</td>
+      <td>JSON-on-disk with fcntl locks.</td>
+      <td>SQLite behind the same Protocols. JSON kept as a test backend.</td>
+    </tr>
+    <tr>
+      <td>Recovery</td>
+      <td>Process restart drops in-flight conversations.</td>
+      <td><code>recover_in_flight()</code> at startup re-spawns per-case drivers from durable state.</td>
+    </tr>
+    <tr>
+      <td>Simulator</td>
+      <td>Channel picker + fire button.</td>
+      <td>Channel picker (initial only) + business-hours / at-dealer sliders + progressively-revealed event buttons + opt-out badge.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>The lifecycle</h2>
+
+<div class="mermaid">
+flowchart TD
+    TRG([Trigger fires]) --> CR[CREATED]
+    CR -->|business hours open| CC[CONTACTING_CUSTOMER]
+    CC -->|customer declines| TDECL([DECLINED])
+    CC -->|customer goes silent| TABN([ABANDONED])
+    CC -->|customer opts out| TOPT([OPTED_OUT])
+    CC -->|customer agrees| SP[SLOT_PROPOSED]
+    SP --> SPK[SLOT_PICKED]
+    SPK --> CWD[CONFIRMING_WITH_DEALER]
+    CWD -->|dealer rejects| SP
+    CWD -->|dealer confirms| BK[BOOKED]
+    BK -->|24h or more to slot| AR[INITIAL_REMINDER_DUE]
+    BK -->|under 24h to slot| FRD[FINAL_REMINDER_DUE]
+    AR --> RM[INITIAL_REMINDER_SENT]
+    RM -->|confirm| FRD
+    RM -->|silence after retry| FRD
+    RM -->|cancel| TCANC([CANCELLED])
+    RM -->|opt out| TOPT
+    RM -->|reschedule one-shot| RS[RESCHEDULING]
+    RS --> SP
+    RS -->|second swing fails| TRF([RESCHEDULE_FAILED])
+    FRD --> FRS[FINAL_REMINDER_SENT]
+    FRS -->|confirm or silence| FRS
+    FRS -->|cancel| TCANC
+    FRS -->|reschedule one-shot| RS
+    FRS -->|vehicle entered dealer| SH[SHOWED]
+    FRS -->|end of day, no entry| TNS([NO_SHOW])
+    SH -->|vehicle exited dealer — service event complete| AWF[AWAITING_FEEDBACK]
+    AWF -->|reply or timeout| TC([COMPLETED])
+
+    classDef terminal fill:#fef2f2,stroke:#fecaca,color:#7f1d1d
+    classDef good fill:#f0fdf4,stroke:#bbf7d0,color:#14532d
+    class TDECL,TABN,TOPT,TCANC,TRF,TNS terminal
+    class TC good
+</div>
+
+<p class="legend">
+  <span class="swatch gray">Non-terminal</span>
+  <span class="swatch red">Terminal (not_booked)</span>
+  <span class="swatch green">Terminal (serviced)</span>
+</p>
+
+<h3>Terminal states (case closed)</h3>
+<ul>
+  <li><span class="pill bad">DECLINED</span> Customer said no during initial outreach.</li>
+  <li><span class="pill bad">CANCELLED</span> Was booked; customer pulled the plug at reminder.</li>
+  <li><span class="pill bad">ABANDONED</span> Customer stopped responding before booking.</li>
+  <li><span class="pill bad">NO_SHOW</span> Booked, no cancel; vehicle never entered dealer geofence.</li>
+  <li><span class="pill bad">RESCHEDULE_FAILED</span> One-shot reschedule used, second swing missed.</li>
+  <li><span class="pill bad">OPTED_OUT</span> Customer sent STOP / UNSUBSCRIBE.</li>
+  <li><span class="pill good">COMPLETED</span> Service event happened; feedback collected or skipped per policy.</li>
+</ul>
+<p><code>business_outcome</code> collapses every non-<code>COMPLETED</code> terminal to <em>not_booked</em> for the dealer KPI rollup; the precise <code>state</code> is preserved on each <code>Case</code> for operations review.</p>
+
+<h2>Two state machines, one Protocol boundary</h2>
+
+<p>The case has its own state machine, and each call (voice or SMS) has its own state machine. Neither knows the other's internals. They meet at the <code>CallSession</code> Protocol; their only contract is "ask for a call, get back a <code>CallOutcome</code>."</p>
+
+<p>The split is <strong>temporal</strong>. Outside a call, the CaseManager is in charge and the case sits in a durable stage (e.g. <code>INITIAL_REMINDER_DUE</code>). When it's time to talk to the customer, the CaseManager hands control to a CallManager, which advances its own per-call state turn by turn (dial → opened → conversing → terminal). When the call ends, the CallManager returns a single <code>CallOutcome</code> and control flows back to the CaseManager, which records the outcome and transitions the durable case state (e.g. to <code>BOOKED</code>). The CaseManager is always the system of record; the CallManager is the active driver during its window.</p>
+
+<div class="grid-2">
+  <div class="card">
+    <h4>CaseManager</h4>
+    <p class="role">System of record. Owns durable case state across calls.</p>
+    <ul>
+      <li>Tracks lifecycle stage: <code>CREATED → ... → COMPLETED</code></li>
+      <li>Reacts to business hours, geofence, reminder windows, dealer responses, opt-out</li>
+      <li>Hands off to a CallManager when the case needs to talk to the customer</li>
+      <li>On call return: records the <code>CallOutcome</code> and advances the case stage</li>
+      <li>Never sees: LLM turns, twilio SIDs, ElevenLabs status, stop keywords</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h4>CallManager (per channel)</h4>
+    <p class="role">Active driver during a call. Owns the per-call state machine.</p>
+    <ul>
+      <li>Has exclusive ownership while the call is live — case state is frozen</li>
+      <li>Advances per-call state: dial → opened → conversing → terminal</li>
+      <li>Reacts to LLM turns, twilio inbound, stop keywords, inactivity</li>
+      <li>Returns one <code>CallOutcome</code> when the conversation ends</li>
+      <li>Never sees: reminder timers, dealer state, geofence, lifecycle stage names</li>
+    </ul>
+  </div>
+</div>
+
+<p>The boundary is enforced by the <code>CallSession</code> Protocol that already exists today. The CaseManager imports the Protocol, never the implementation.</p>
+
+<pre><code>class CallSession(Protocol):
+    async def start(self, *, case: Case, intent: Intent) -> CallOutcome: ...
+
+# Voice and SMS each have their own CallManager that satisfies this Protocol.
+# Inside each, the channel runs its own pure reducer + thin driver — but
+# none of that complexity leaks past the Protocol.</code></pre>
+
+<h2>Happy path — one case end to end</h2>
+
+<p>Same architecture, viewed as a sequence. Shows the CaseManager handing off to each CallManager, the channel switch after initial outreach (voice or SMS at customer's choice, then SMS for everything downstream), and the ports firing in for dealer confirmation and geofence events.</p>
+
+<div class="mermaid">
+sequenceDiagram
+    autonumber
+    participant TR as Trigger
+    participant CM as CaseManager
+    participant V as VoiceCallManager
+    participant S as SmsCallManager
+    participant D as DealerSlotPort
+    participant G as GeofencePort
+    participant C as Customer
+
+    TR->>CM: trigger (customer prefers voice)
+    Note over CM: stage = CONTACTING_CUSTOMER
+    CM->>V: start(case, intent=OUTREACH)
+    Note over V,C: ElevenLabs agent — one prompt, fixed for the call
+    V->>C: "Hi, time to schedule service"
+    C->>V: "Yes, Tuesday 8:30 works"
+    V-->>CM: CallOutcome(agreed, slot=Tue 8:30)
+
+    CM->>D: confirm(Tue 8:30)
+    D-->>CM: confirmed
+    Note over CM: stage = BOOKED
+
+    Note over CM: T-24h timer fires
+    CM->>S: start(case, intent=INITIAL_REMINDER)
+    Note over S,C: SMS — post-booking prompt, fixed for the conversation
+    S->>C: "Reminder: appt tomorrow 8:30"
+    C->>S: "Confirmed"
+    S-->>CM: CallOutcome(confirmed)
+    Note over CM: stage = FINAL_REMINDER_DUE
+
+    Note over CM: day-of timer fires
+    CM->>S: start(case, intent=FINAL_REMINDER)
+    Note over S,C: SMS — post-booking prompt (final reminder branch)
+    S->>C: "See you at 8:30!"
+    S-->>CM: CallOutcome(touched)
+
+    G-->>CM: vehicle entered dealer
+    Note over CM: stage = SHOWED
+    G-->>CM: vehicle exited dealer — service event complete
+    Note over CM: stage = AWAITING_FEEDBACK
+
+    CM->>S: start(case, intent=FEEDBACK)
+    Note over S,C: SMS — FEEDBACK prompt
+    S->>C: "How did it go?"
+    C->>S: "All good, thanks"
+    S-->>CM: CallOutcome(feedback_received)
+    Note over CM: stage = COMPLETED
+</div>
+
+<p>The CaseManager appears on every horizontal line — it never sleeps, never delegates its bookkeeping. The CallManagers come and go: each one owns its call window, then returns a single <code>CallOutcome</code> and leaves the diagram.</p>
+
+<h2>Prompt composition &amp; channel strategy</h2>
+
+<p class="lede">
+  Invariant: <strong>one call = one stage = one prompt.</strong> This is what makes ElevenLabs' single-prompt constraint a non-issue and keeps the two channels symmetric end-to-end.
+</p>
+
+<p>During a call, the active CallManager composes its prompt once at call-start and uses it for the entire conversation. Stage transitions (e.g. <code>INITIAL_REMINDER_SENT → FINAL_REMINDER_DUE</code>, <code>SHOWED → AWAITING_FEEDBACK</code>) happen <em>between</em> calls, never within them. We never swap a prompt mid-conversation.</p>
+
+<h3>Channel × stage matrix</h3>
+
+<table>
+  <thead><tr><th>Stage</th><th>Voice</th><th>SMS</th></tr></thead>
+  <tbody>
+    <tr><td>OUTREACH</td><td>yes</td><td>yes (customer's choice)</td></tr>
+    <tr><td>INITIAL_REMINDER</td><td>—</td><td>yes</td></tr>
+    <tr><td>FINAL_REMINDER</td><td>—</td><td>yes</td></tr>
+    <tr><td>FEEDBACK</td><td>—</td><td>yes</td></tr>
+  </tbody>
+</table>
+
+<p>Voice is used <strong>only for initial outreach</strong>; everything downstream is SMS. This is the single design choice that lets us live within ElevenLabs' constraint without effort: the voice agent only ever needs one prompt and one tool set, both for OUTREACH.</p>
+
+<h3>Why this works for both channels</h3>
+
+<div class="grid-2">
+  <div class="card">
+    <h4>SmsCallManager</h4>
+    <p class="role">Channel where we own the LLM call.</p>
+    <ul>
+      <li>Calls <code>build_prompt(case, stage)</code> once at conversation start</li>
+      <li>Caches the result for the call's lifetime</li>
+      <li>Sends the same prompt with every LLM turn</li>
+      <li>Per-stage allowed tool list — trivial to vary, we control the call</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h4>VoiceCallManager</h4>
+    <p class="role">Channel where ElevenLabs owns the LLM call.</p>
+    <ul>
+      <li>Calls <code>build_prompt(case, OUTREACH)</code> once at agent-start</li>
+      <li>Hands the string to ElevenLabs; ElevenLabs locks it for the call</li>
+      <li>Never swaps mid-call (matches ElevenLabs' constraint exactly)</li>
+      <li>Tools configured once at the agent level (book_slot, decline, reschedule_initial)</li>
+    </ul>
+  </div>
+</div>
+
+<h3>The composer doesn't know about channels</h3>
+
+<pre><code># prompt_composer signature — channel-agnostic
+def build_prompt(case: Case, stage: Stage) -> str: ...
+
+# Internally:
+#   core (identity, tone, guardrails)
+# + stage overlay (per-stage instructions + tool surface)
+# + case variables (customer, vehicle, slot, etc.)
+# ----------------------------------------
+# = one composed string</code></pre>
+
+<p>Same function, same inputs, same output, regardless of who's about to use it. The channel concern lives entirely in the CallManagers: voice composes once and hands off; SMS composes once and caches. The composer doesn't care which.</p>
+
+<h3>What we lose by this discipline</h3>
+
+<ul>
+  <li>We can't mid-conversation re-prompt based on what the customer said in turn 3. (We don't want to — it breaks conversational continuity and would surprise the LLM mid-flight.)</li>
+  <li>We can't run voice for INITIAL_REMINDER / FINAL_REMINDER / FEEDBACK without configuring additional ElevenLabs agents. (We're not doing this — voice is OUTREACH only by design.)</li>
+</ul>
+
+<p>If either of those constraints ever needs to flex, the <code>CallSession</code> Protocol is still the only seam that has to change.</p>
+
+<h2>Event vocabulary at the case boundary</h2>
+
+<p>Only these high-level signals cross into the CaseManager. They come from the simulator UI today, from cron / telematics / Twilio / ElevenLabs in production. Same vocabulary either way.</p>
+
+<table>
+  <thead><tr><th>Signal</th><th>Source today (sim)</th><th>Source in prod</th></tr></thead>
+  <tbody>
+    <tr><td><code>BusinessHoursOpened</code> / <code>...Closed</code></td><td>UI slider</td><td>Cron at 8a/6p</td></tr>
+    <tr><td><code>VehicleEnteredDealer</code> / <code>...Exited</code></td><td>UI slider</td><td>Telematics geofence</td></tr>
+    <tr><td><code>InitialReminderDue</code></td><td>UI button</td><td>Scheduled timer (T-24h)</td></tr>
+    <tr><td><code>FinalReminderDue</code></td><td>UI button</td><td>Scheduled timer (~2-3h pre-slot)</td></tr>
+    <tr><td><code>EndOfBusinessDayReached</code></td><td>UI button</td><td>Cron at close</td></tr>
+    <tr><td><code>CallEnded(outcome)</code></td><td>CallManager.start returns</td><td>Same</td></tr>
+    <tr><td><code>DealerSlotsListed</code> / <code>DealerConfirmed</code> / <code>DealerRejected</code></td><td>Stub port</td><td>Partner dealer-scheduling tool</td></tr>
+    <tr><td><code>CustomerOptedOut</code> / <code>...OptedIn</code></td><td>SmsCallManager keyword detect</td><td>Same</td></tr>
+    <tr><td><code>TimerFired(name)</code></td><td>UI button</td><td>Internal scheduler</td></tr>
+  </tbody>
+</table>
+
+<p><strong>Not in the vocabulary</strong> (channel-internal — live inside CallManagers): <code>CustomerReplied(text)</code>, <code>TwilioSidReceived</code>, <code>LlmTurnFailed</code>, <code>ElevenLabsStatusUpdated</code>. If any of these show up at the case boundary, that's a bug.</p>
+
+<h2>Queue inventory &amp; backpressure</h2>
+
+<p class="lede">
+  Every async boundary in the system has a bounded queue with explicit overflow behavior and a runtime-checkable depth accessor. No silent unbounded queues — overflow either logs and drops (telemetry-shaped) or logs and aborts (control-flow-shaped), but never just grows memory.
+</p>
+
+<p>The discipline: control signals (CaseSignals, customer turns) get bounds that abort or yield when overflowed because dropping one silently breaks correctness. Telemetry (EventBus subscribers) drops on overflow because the publisher must never block on a slow consumer. Outbound API calls (Twilio, LLM) aren't queue-shaped — they're rate-limit-shaped, so they get concurrency semaphores and tenacity retries instead.</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>#</th>
+      <th>Queue</th>
+      <th>Where</th>
+      <th>Max</th>
+      <th>Overflow behavior</th>
+      <th>Runtime check</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>1</td>
+      <td>EventBus subscriber queues</td>
+      <td><code>guidepoint/events/_bus.py</code></td>
+      <td>256/sub</td>
+      <td><code>put_nowait</code> → log <code>queue.overflow.event_bus</code>, drop event. Publisher never blocks. <span class="pill good">live</span></td>
+      <td><code>bus.subscriber_depths() → tuple[(int, int), ...]</code></td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td>SMS inbound per active case</td>
+      <td><code>sms_adapter/_call_session.py</code></td>
+      <td>32 turns</td>
+      <td><code>put_nowait</code> → log <code>queue.overflow.sms_inbound</code>, return <code>False</code> to webhook. 24h inactivity timer is the safety net. <span class="pill good">live</span></td>
+      <td><code>session.queue_depths() → dict[CaseId, (int, int)]</code></td>
+    </tr>
+    <tr>
+      <td>3</td>
+      <td>Per-case <code>CaseSignal</code> queue</td>
+      <td><code>guidepoint/case/_driver.py</code> (Phase 4)</td>
+      <td>64 signals</td>
+      <td><code>put_nowait</code> → log <code>queue.overflow.case_signal</code>, transition case to <code>ABANDONED</code> with <code>detail="signal queue overflow"</code>. Signals are control flow — better to lose one case loudly than corrupt all of them silently. <span class="pill warn">phase 4</span></td>
+      <td><code>driver.queue_depths() → dict[CaseId, (int, int)]</code></td>
+    </tr>
+    <tr>
+      <td>4</td>
+      <td>Twilio outbound concurrency</td>
+      <td><code>sms_adapter/_twilio.py</code> (Phase 5)</td>
+      <td>8 concurrent</td>
+      <td><code>asyncio.Semaphore(8)</code> — additional calls wait. Tenacity handles Twilio 429s with exponential backoff. <span class="pill warn">phase 5</span></td>
+      <td><code>twilio.in_flight() → int</code></td>
+    </tr>
+    <tr>
+      <td>5</td>
+      <td>LLM completion concurrency</td>
+      <td><code>sms_adapter/_litellm.py</code> (Phase 5)</td>
+      <td>8 concurrent</td>
+      <td><code>asyncio.Semaphore(8)</code> — additional calls wait. Tenacity handles provider rate-limits. <span class="pill warn">phase 5</span></td>
+      <td><code>llm.in_flight() → int</code></td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>The "checkable" part</h3>
+
+<p>Every row's runtime-check column is an actual method on the live object. A small <code>/health/queues</code> endpoint on the simulator (Phase 10) calls each one and returns:</p>
+
+<pre><code>{
+  "event_bus":   [(12, 256), (3, 256)],
+  "sms_inbound": {"case_abc": (4, 32), "case_def": (1, 32)},
+  "case_signal": {"case_abc": (2, 64), "case_def": (0, 64)},
+  "twilio_in_flight": 2,
+  "llm_in_flight": 1
+}</code></pre>
+
+<p>This is the difference between "we documented the queues" and "we know the queues are healthy right now." Operators can poll the endpoint during user-group testing to spot a queue creeping toward its max before it actually overflows.</p>
+
+<h3>Overflow log discipline</h3>
+
+<p>Every overflow path emits a structured log line with the same shape:</p>
+
+<pre><code>queue.overflow.&lt;queue_name&gt;
+  current_depth: int   # what the queue was at when overflow hit
+  max_depth:     int   # the configured bound
+  &lt;queue-specific fields&gt;  # e.g. case_id, payload_type, from_number
+  level:         warning   (telemetry) | error (control-flow)</code></pre>
+
+<p>A single log scrape pattern (<code>queue.overflow.</code>) catches every backpressure event in the system. Phase 11 tests assert that each overflow path produces both the structured log AND the documented behavioral consequence (event dropped / call yields / case aborted).</p>
+
+<h2>Python org chart — what's done where</h2>
+
+<p>This is the package and module layout after v2 lands. Color key: <span class="pill good">NEW</span> brand-new in v2; <span class="pill accent">MODIFIED</span> existing module reshaped; everything else is unchanged.</p>
+
+<div class="tree"><span class="pkg">guidepoint/</span>                                       <span class="dim"># package: case lifecycle + ports + persistence</span>
+└── src/guidepoint/
+    ├── <span class="pkg">case/</span>
+    │   ├── __init__.py                         <span class="dim"># front door: Protocols + factories</span>
+    │   ├── _models.py                          <span class="modify"># MODIFIED: full CaseState enum, initial_channel, reschedule_count</span>
+    │   ├── _factory.py                         <span class="dim"># unchanged: build Case from Trigger</span>
+    │   ├── _repository.py                      <span class="dim"># Protocol + JSON impl (untouched)</span>
+    │   ├── _manager.py                         <span class="modify"># MODIFIED: thin shell; spawns CaseDriver via start()</span>
+    │   ├── <span class="new">_reducer.py</span>                         <span class="new"># NEW: pure decide_next_case_state(state, case, signal, clock)</span>
+    │   ├── <span class="new">_driver.py</span>                          <span class="new"># NEW: CaseDriver — per-case asyncio task + on_signal entry</span>
+    │   ├── <span class="new">_signals.py</span>                         <span class="new"># NEW: CaseSignal discriminated union (10–12 signals)</span>
+    │   ├── <span class="new">_ports.py</span>                           <span class="new"># NEW: DealerSlotPort + GeofencePort Protocols</span>
+    │   ├── _call_session.py                    <span class="dim"># CallSession Protocol — unchanged contract</span>
+    │   └── elevenlabs/                         <span class="dim"># the voice CallManager lives here</span>
+    │       ├── __init__.py                     <span class="dim"># front door: build_voice_call_manager()</span>
+    │       ├── <span class="new">_call_manager.py</span>                <span class="new"># NEW: VoiceCallManager (refactored from _LiveCallSession)</span>
+    │       ├── <span class="new">_call_reducer.py</span>                <span class="new"># NEW: pure per-call state machine</span>
+    │       └── <span class="new">_call_driver.py</span>                 <span class="new"># NEW: thin driver — ElevenLabs status + transcript</span>
+    ├── <span class="new">persistence/</span>                              <span class="new"># NEW package</span>
+    │   ├── __init__.py                         <span class="new"># front door: build_repositories(backend="sqlite"|"json")</span>
+    │   └── sqlite/
+    │       ├── _schema.sql                     <span class="new"># NEW: cases / case_events / sms_* / customers / triggers</span>
+    │       ├── _case_repo.py                   <span class="new"># NEW: CaseRepository SQLite impl</span>
+    │       ├── _event_log.py                   <span class="new"># NEW: append-only event table</span>
+    │       └── _migrate_from_json.py           <span class="new"># NEW: bulk-import existing JSON data</span>
+    ├── clock/                                  <span class="dim"># unchanged</span>
+    ├── events/                                 <span class="dim"># unchanged: EventBus[CaseEvent]</span>
+    ├── master_data/                            <span class="modify"># MODIFIED: Customer.sms_consent</span>
+    ├── observability/                          <span class="dim"># unchanged: structlog wiring</span>
+    └── scheduling/                             <span class="dim"># unchanged</span>
+
+<span class="pkg">sms_adapter/</span>                                     <span class="dim"># package: everything that talks to Twilio + LLM</span>
+└── src/sms_adapter/
+    ├── __init__.py                             <span class="modify"># MODIFIED: export SmsCallManager (replaces SmsCallSession)</span>
+    ├── <span class="new">_call_manager.py</span>                        <span class="new"># NEW: SmsCallManager (refactored from _call_session.py)</span>
+    ├── <span class="new">_call_reducer.py</span>                        <span class="new"># NEW: pure per-call state machine for SMS</span>
+    ├── <span class="new">_call_driver.py</span>                         <span class="new"># NEW: thin driver — inbound queue + LLM + twilio</span>
+    ├── <span class="new">_optout.py</span>                              <span class="new"># NEW: STOP/START keyword detection + consent flip</span>
+    ├── <span class="new">_gated_twilio.py</span>                        <span class="new"># NEW: GatedTwilioSend wrapper — honors sms_consent</span>
+    ├── _routing.py                             <span class="dim"># unchanged: RoutingStore</span>
+    ├── _history.py                             <span class="dim"># unchanged: HistoryStore</span>
+    ├── _twilio.py                              <span class="dim"># unchanged: raw twilio_send</span>
+    ├── _litellm.py                             <span class="dim"># unchanged: llm_complete</span>
+    └── _event_log.py                           <span class="dim"># unchanged: sms.log</span>
+
+<span class="pkg">prompt_composer/</span>                                 <span class="dim"># package: prompt assembly</span>
+└── src/prompt_composer/
+    ├── __init__.py                             <span class="modify"># MODIFIED: build_prompt(stage=Stage.OUTREACH|INITIAL_REMINDER|FINAL_REMINDER|FEEDBACK)</span>
+    ├── _stages.py                              <span class="new"># NEW: Stage enum + per-stage tool lists</span>
+    └── _renderer.py                            <span class="modify"># MODIFIED: pull stage overlay on top of core</span>
+   (config moves to: 11Labs/config/)
+    ├── prompt-core.md                          <span class="new"># NEW: identity, tone, guardrails (shared)</span>
+    ├── prompt-stage-outreach.md                <span class="new"># NEW</span>
+    ├── prompt-stage-reminder.md                <span class="new"># NEW</span>
+    ├── prompt-stage-day-of.md                  <span class="new"># NEW</span>
+    └── prompt-stage-feedback.md                <span class="new"># NEW</span>
+
+<span class="pkg">simulator/</span>                                       <span class="dim"># package: FastAPI app + per-user UX</span>
+└── src/simulator/
+    ├── __init__.py                             <span class="dim"># unchanged</span>
+    ├── _app.py                                 <span class="modify"># MODIFIED: wires CaseDriver + per-channel CallManagers + ports</span>
+    ├── _routes.py                              <span class="modify"># MODIFIED: /api/fire + new /api/case/{id}/signal for sim events</span>
+    ├── _users.py                               <span class="modify"># MODIFIED: per-user CaseManager bundle</span>
+    ├── _basic_auth.py                          <span class="dim"># unchanged</span>
+    ├── _sms_setup.py                           <span class="modify"># MODIFIED: builds SmsCallManager (+ GatedTwilioSend, OptoutStore)</span>
+    ├── <span class="new">_sim_ports.py</span>                           <span class="new"># NEW: sim DealerSlotPort + GeofencePort</span>
+    ├── _slots.py                               <span class="dim"># unchanged</span>
+    ├── _connection.py                          <span class="dim"># unchanged</span>
+    ├── _ephemeral_triggers.py                  <span class="dim"># unchanged</span>
+    └── templates/
+        ├── index.html                          <span class="modify"># MODIFIED: per-case control panel</span>
+        ├── <span class="new">_case_panel.html</span>                    <span class="new"># NEW: sliders + revealed buttons + opt-out badge</span>
+        └── static/                             <span class="modify"># MODIFIED: live WS state updates</span>
+
+<span class="pkg">llm/</span>                                             <span class="dim"># unchanged: LiteLLM client wiring</span>
+<span class="pkg">sms/</span>                                             <span class="dim"># unchanged: Twilio webhook</span>
+</div>
+
+<h3>Read this like an org chart</h3>
+<ul>
+  <li><strong>guidepoint.case</strong> is the brains — case state machine + Protocols. Everything else plugs into it.</li>
+  <li><strong>sms_adapter</strong> and <strong>guidepoint.case.elevenlabs</strong> are the two channel implementations — they satisfy the <code>CallSession</code> Protocol but otherwise stay in their own lanes.</li>
+  <li><strong>guidepoint.persistence</strong> holds backends; <code>build_app</code> picks one via env var. JSON stays usable for tests.</li>
+  <li><strong>simulator</strong> is the operator UX — composes everything, gives operators a UI to fire triggers and emit world signals. Same signals as prod; the only difference is who's clicking.</li>
+  <li><strong>prompt_composer</strong> grows a <code>Stage</code> enum so the right prompt + tool surface goes to the LLM for each case stage.</li>
+</ul>
+
+<h2>Phase plan + budget</h2>
+
+<table>
+  <thead>
+    <tr><th>#</th><th>Phase</th><th>Budget</th><th>Risk</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>1</td><td>State model expansion</td><td>1–2h</td><td><span class="pill good">low</span></td></tr>
+    <tr><td>2</td><td>Case-level event vocabulary</td><td>1–2h</td><td><span class="pill good">low</span></td></tr>
+    <tr><td>3</td><td>Case reducer (pure)</td><td>4–6h</td><td><span class="pill warn">medium</span></td></tr>
+    <tr><td>4</td><td>Case driver (async loop + recovery)</td><td>3–5h</td><td><span class="pill warn">medium</span></td></tr>
+    <tr><td>5</td><td>Per-channel CallManagers (5a SMS, 5b voice)</td><td>6–10h</td><td><span class="pill bad">highest</span></td></tr>
+    <tr><td>6</td><td>Dealer + Geofence Ports</td><td>1–2h</td><td><span class="pill good">low</span></td></tr>
+    <tr><td>7</td><td>Stage-aware prompts</td><td>3–5h</td><td><span class="pill warn">medium</span></td></tr>
+    <tr><td>8</td><td>Opt-out (consent, gate, OPTED_OUT terminal)</td><td>2–3h</td><td><span class="pill good">low</span></td></tr>
+    <tr><td>9</td><td>SQLite-backed persistence + recover_in_flight</td><td>5–8h</td><td><span class="pill warn">medium</span></td></tr>
+    <tr><td>10</td><td>Simulator UX (sliders / buttons / badge)</td><td>4–6h</td><td><span class="pill good">low</span></td></tr>
+    <tr><td>11</td><td>Lifecycle + recovery tests</td><td>3–5h</td><td><span class="pill good">low</span></td></tr>
+  </tbody>
+</table>
+
+<p><strong>Subtotal:</strong> 33–54h. <strong>With 25% contingency:</strong> ~42–68h of focused working time.</p>
+
+<h3>Calendar</h3>
+<ul>
+  <li><strong>Full-time:</strong> 8–14 working days (~2–3 weeks)</li>
+  <li><strong>Half-time / split:</strong> 3–6 weeks</li>
+  <li><strong>Evenings only:</strong> 6–12 weeks</li>
+</ul>
+
+<h3>Pacing — three natural checkpoints</h3>
+<ol>
+  <li><strong>Block A — the case spine.</strong> Phases 1–4. ~9–15h. Spine works end-to-end with the existing SMS/voice still intact. Demo to nobody but yourself; confirm nothing felt wrong.</li>
+  <li><strong>Block B — channels, prompts, opt-out.</strong> Phases 5–8. ~12–20h. Ship a demo to a couple of colleagues; gather feedback before persistence work.</li>
+  <li><strong>Block C — persistence, UX, comprehensive tests.</strong> Phases 9–11. ~12–19h. The prototype becomes something you can put in front of a cross-section of the company.</li>
+</ol>
+
+<h2>Discipline (the test cadence)</h2>
+
+<p>After every phase commit, four lines must be green before phase N+1 opens:</p>
+
+<pre><code>sms_adapter:     pytest -q  → X/X passing
+simulator:       pytest -q  → Y/Y passing
+guidepoint:      pytest -q  → Z/Z passing  (+ ≥90% coverage)
+prompt_composer: pytest -q  → 15/15 passing</code></pre>
+
+<p>If anything regresses, it gets fixed in the same commit, not the next one. No phase opens until the prior phase is locked.</p>
+
+<h2>Out of scope</h2>
+<ul>
+  <li>Postgres. SQLite is enough through pilot; Protocol seam keeps the swap cheap.</li>
+  <li>Real telematics — sim <code>GeofencePort</code> only.</li>
+  <li>Real partner dealer-scheduling tool — sim <code>DealerSlotPort</code> only (swap when partner is ready).</li>
+  <li>Voice for downstream stages — initial voice → all downstream SMS, by design.</li>
+  <li>Multi-tenant (cross-company) — single-tenant per-user only.</li>
+  <li>A2P 10DLC / Twilio Messaging Service — already settled.</li>
+</ul>
+
+<footer>
+  v2 plan brief — internal · review for tomorrow morning kickoff.
+</footer>
+
+</main>
+
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'base',
+    themeVariables: {
+      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif',
+      fontSize: '13px',
+      primaryColor: '#eff6ff',
+      primaryTextColor: '#0f172a',
+      primaryBorderColor: '#bfdbfe',
+      lineColor: '#475569',
+      tertiaryColor: '#f8fafc',
+    },
+    flowchart: { useMaxWidth: true, htmlLabels: true, curve: 'basis' }
+  });
+</script>
+
+</body>
+</html>

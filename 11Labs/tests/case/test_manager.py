@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from guidepoint.case import (
+    CaseError,
     CaseEvent,
     CaseId,
     CaseState,
@@ -26,6 +27,7 @@ from guidepoint.master_data import (
 )
 from tests.case._helpers import (
     FakeBookedCallSession,
+    FakeOptedOutCallSession,
     FixedClock,
     sample_customer,
     sample_dealer,
@@ -134,3 +136,56 @@ async def test_fire_with_mismatched_records_marks_trigger_failed(tmp_path: Path)
     with pytest.raises(CustomerNotFoundError):
         await manager.fire(sample_trigger())
     assert triggers.get(sample_trigger().id).status == "failed"
+
+
+@pytest.mark.asyncio
+async def test_fire_opted_out_closes_case_and_updates_master_data(tmp_path: Path) -> None:
+    master = build_json_master_data_repository(paths=JsonFilePaths.for_root(tmp_path))
+    master.save_customer(sample_customer())
+    master.save_dealer(sample_dealer())
+    master.save_vehicle(sample_vehicle())
+    triggers = build_json_trigger_source(paths=JsonTriggerPaths.for_root(tmp_path))
+    triggers.save(sample_trigger())
+    cases = build_json_case_repository(paths=JsonCasePaths.for_root(tmp_path))
+    bus = build_event_bus(payload_type=CaseEvent)
+    clock = FixedClock()
+    manager = build_default_case_manager(
+        master_data=master,
+        case_repo=cases,
+        trigger_source=triggers,
+        call_session=FakeOptedOutCallSession(),
+        bus=bus,
+        clock=clock,
+        retry_policy=RetryPolicy(),
+    )
+    case = await manager.fire(sample_trigger())
+    assert case.state == CaseState.OPTED_OUT
+    customer = master.get_customer(sample_customer().id)
+    assert customer.opt_status == "opted_out"
+
+
+@pytest.mark.asyncio
+async def test_start_rejects_sms_when_customer_opted_out(tmp_path: Path) -> None:
+    master = build_json_master_data_repository(paths=JsonFilePaths.for_root(tmp_path))
+    master.save_customer(
+        sample_customer().model_copy(update={"opt_status": "opted_out"})
+    )
+    master.save_dealer(sample_dealer())
+    master.save_vehicle(sample_vehicle())
+    triggers = build_json_trigger_source(paths=JsonTriggerPaths.for_root(tmp_path))
+    trigger = sample_trigger().model_copy(update={"channel_preference": "sms"})
+    triggers.save(trigger)
+    cases = build_json_case_repository(paths=JsonCasePaths.for_root(tmp_path))
+    bus = build_event_bus(payload_type=CaseEvent)
+    clock = FixedClock()
+    manager = build_default_case_manager(
+        master_data=master,
+        case_repo=cases,
+        trigger_source=triggers,
+        call_sessions={"voice": FakeBookedCallSession(), "sms": FakeBookedCallSession()},
+        bus=bus,
+        clock=clock,
+    )
+    with pytest.raises(CaseError, match="opted out"):
+        await manager.start(trigger)
+    assert triggers.get(trigger.id).status == "failed"

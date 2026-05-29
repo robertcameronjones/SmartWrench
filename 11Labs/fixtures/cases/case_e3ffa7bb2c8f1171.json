@@ -1,0 +1,93 @@
+{
+  "case_id": "case_e3ffa7bb2c8f1171",
+  "trigger_id": "trig_15142d8d3cf9",
+  "correlation_id": "corr_e0d719a0580e",
+  "customer": {
+    "id": "cust_jones_robert",
+    "first_name": "Robert",
+    "last_name": "Jones",
+    "phone": "+13139095330",
+    "opt_status": "opted_in",
+    "preferred_channel": "voice",
+    "timezone": "America/Detroit"
+  },
+  "dealer": {
+    "id": "dealer_village_jeep_royal_oak",
+    "name": "Village Jeep",
+    "phone": "+12487813798",
+    "address": "31200 Woodward Ave, Royal Oak, MI 48073",
+    "ride_radius_miles": 10
+  },
+  "vehicle": {
+    "vin": "1C4RJFBG5NC123456",
+    "owner_id": "cust_jones_robert",
+    "year": 2026,
+    "make": "Jeep",
+    "model": "Grand Cherokee",
+    "odometer_miles": 32180,
+    "current_location": {
+      "latitude": 42.4895,
+      "longitude": -83.1446,
+      "description": "Owner's home, driveway"
+    }
+  },
+  "service_event": {
+    "type": "maintenance",
+    "summary": "oil change",
+    "narrative": "oil change tire rotation inspect vehicle braking and other critical systems"
+  },
+  "offered_slots": [
+    {
+      "id": "slot_2026_05_12_0830",
+      "starts_at": "2026-05-12T12:30:00Z",
+      "display": "Tuesday, May 12, 2026 - 8:30 AM"
+    },
+    {
+      "id": "slot_2026_05_12_1330",
+      "starts_at": "2026-05-12T17:30:00Z",
+      "display": "Tuesday, May 12, 2026 - 1:30 PM"
+    },
+    {
+      "id": "slot_2026_05_13_0900",
+      "starts_at": "2026-05-13T13:00:00Z",
+      "display": "Wednesday, May 13, 2026 - 9:00 AM"
+    }
+  ],
+  "initial_channel": "sms",
+  "user_id": "demo",
+  "state": "contacting_customer",
+  "attempt_count": 1,
+  "next_attempt_at": null,
+  "reschedule_count": 0,
+  "context_notes": "",
+  "call_attempts": [],
+  "events": [
+    {
+      "event_id": "evt_07adb1132b99",
+      "case_id": "case_e3ffa7bb2c8f1171",
+      "correlation_id": "corr_e0d719a0580e",
+      "attempt_number": 1,
+      "timestamp": "2026-05-26T14:18:22.583017Z",
+      "source": "system",
+      "level": "info",
+      "event": "case.outreach.started",
+      "detail": "business hours opened — placing initial outreach call"
+    },
+    {
+      "event_id": "evt_6107909f1414",
+      "case_id": "case_e3ffa7bb2c8f1171",
+      "correlation_id": "corr_e0d719a0580e",
+      "attempt_number": 1,
+      "timestamp": "2026-05-26T14:18:46.562386Z",
+      "source": "sms",
+      "level": "info",
+      "event": "sms.opened",
+      "detail": "stage=outreach to=+13139095330 sid=SM566a0c43fab30fe97a7b0a9e635536c5"
+    }
+  ],
+  "outcome_detail": "",
+  "booked_slot_id": null,
+  "booked_slot_display": "",
+  "created_at": "2026-05-26T14:18:22.568657Z",
+  "closed_at": null
+}

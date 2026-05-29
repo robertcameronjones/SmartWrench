@@ -21,7 +21,6 @@ production** (the ``demo:demo`` default is logged loudly at startup).
 from __future__ import annotations
 
 import shutil
-from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Lock
@@ -30,21 +29,10 @@ from typing import final
 import structlog
 from fastapi import HTTPException, Request
 
-from guidepoint.case import (
-    CaseEvent,
-    CaseManager,
-    CaseRepository,
-    Channel,
-    RetryPolicy,
-    TriggerSource,
-    build_default_case_manager,
-)
-from guidepoint.case._call_session import CallSession
-from guidepoint.clock import Clock
-from guidepoint.events import EventBus
 from guidepoint.master_data import (
     JsonFilePaths,
     MasterDataRepository,
+    OptStatus,
     build_json_master_data_repository,
 )
 
@@ -141,21 +129,15 @@ class UserPaths:
 class UserContext:
     """Per-user dependency bundle, cached for process lifetime.
 
-    ``case_manager`` is per-user so customer / vehicle / dealer
-    lookups during ``start()`` / ``fire()`` read from this user's
-    master_data. The underlying ``case_repo``, ``trigger_source``,
-    and ``call_sessions`` (voice + sms) are global, so case files
-    all land in the shared cases/ dir where the ElevenLabs voice
-    callback and the SMS inbound webhook can find them. Per-user
-    case filtering will land in a later commit via a small
-    ``case_owners.json`` manifest.
+    Owns master data (customer / dealer / vehicle) and slots for one
+    operator. All case execution uses the global ``CaseDriver`` on
+    ``app.state``; this context is purely a master-data namespace.
     """
 
     user: User
     paths: UserPaths
     master_data: MasterDataRepository
     slots_repo: SlotsRepository
-    case_manager: CaseManager
 
 
 @final
@@ -167,22 +149,10 @@ class UserContextRegistry:
         *,
         project_root: Path,
         user_registry: UserRegistry,
-        case_repo: CaseRepository,
-        trigger_source: TriggerSource,
-        call_sessions: Mapping[Channel, CallSession],
-        bus: EventBus[CaseEvent],
-        clock: Clock,
-        retry_policy: RetryPolicy | None,
     ) -> None:
         self._project_root = project_root
         self._fixtures_root = (project_root / "fixtures").resolve()
         self._user_registry = user_registry
-        self._case_repo = case_repo
-        self._trigger_source = trigger_source
-        self._call_sessions: dict[Channel, CallSession] = dict(call_sessions)
-        self._bus = bus
-        self._clock = clock
-        self._retry_policy = retry_policy
         self._cache: dict[str, UserContext] = {}
         self._lock = Lock()
 
@@ -195,6 +165,39 @@ class UserContextRegistry:
                 self._cache[user.id] = ctx
             return ctx
 
+    def invalidate_user(self, user_id: str) -> None:
+        """Drop a cached context so the next request reloads master data from disk."""
+        with self._lock:
+            self._cache.pop(user_id, None)
+
+    def set_opt_status_for_phone(
+        self,
+        phone: str,
+        opt_status: OptStatus,
+        *,
+        preferred_user_id: str = "",
+    ) -> bool:
+        """Update ``opt_status`` for the customer with ``phone``; invalidate cache."""
+        user_ids = (
+            (preferred_user_id,)
+            if preferred_user_id
+            else self._user_registry.list_ids()
+        )
+        for user_id in user_ids:
+            ctx = self.for_user(user_id)
+            for customer in ctx.master_data.list_customers():
+                if customer.phone != phone:
+                    continue
+                if customer.opt_status == opt_status:
+                    self.invalidate_user(user_id)
+                    return True
+                ctx.master_data.save_customer(
+                    customer.model_copy(update={"opt_status": opt_status})
+                )
+                self.invalidate_user(user_id)
+                return True
+        return False
+
     def _build(self, user: User) -> UserContext:
         paths = UserPaths.for_user(project_root=self._project_root, user_id=user.id)
         self._seed_if_missing(paths)
@@ -206,21 +209,11 @@ class UserContextRegistry:
             )
         )
         slots_repo = SlotsRepository(path=paths.slots_file)
-        case_manager = build_default_case_manager(
-            master_data=master_data,
-            case_repo=self._case_repo,
-            trigger_source=self._trigger_source,
-            call_sessions=self._call_sessions,
-            bus=self._bus,
-            clock=self._clock,
-            retry_policy=self._retry_policy,
-        )
         return UserContext(
             user=user,
             paths=paths,
             master_data=master_data,
             slots_repo=slots_repo,
-            case_manager=case_manager,
         )
 
     def _seed_if_missing(self, paths: UserPaths) -> None:
@@ -242,13 +235,7 @@ class UserContextRegistry:
 
 
 def get_user_context(request: Request) -> UserContext:
-    """FastAPI dependency: return the per-user context for this request.
-
-    Reads ``request.state.user_id`` (populated by
-    :class:`BasicAuthMiddleware`). If the middleware didn't set it,
-    the request reached a protected route somehow without auth — a
-    500 here is the right answer.
-    """
+    """FastAPI dependency: return the per-user context for this request."""
     user_id = getattr(request.state, "user_id", None)
     if not user_id:
         raise HTTPException(

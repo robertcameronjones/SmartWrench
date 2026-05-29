@@ -29,6 +29,7 @@ from guidepoint.case._models import (
     CaseState,
     SlotId,
 )
+from guidepoint.master_data import VehicleVin
 
 
 class CaseRepository(Protocol):
@@ -50,6 +51,34 @@ class CaseRepository(Protocol):
         """Return the most recently created cases, newest first."""
         ...
 
+    def list_active(self) -> Iterable[Case]:
+        """Return every non-terminal case.
+
+        Used by ``CaseDriver.recover_in_flight`` at startup to respawn
+        per-case tasks after a restart, and by the driver to fan-out
+        world signals (``BusinessHoursOpened``, ``EndOfBusinessDayReached``)
+        to every case that might care.
+        """
+        ...
+
+    def list_by_vehicle_vin(self, vin: VehicleVin) -> Iterable[Case]:
+        """Return non-terminal cases for a given vehicle.
+
+        Drives ``VehicleEnteredDealer`` / ``VehicleExitedDealer`` routing:
+        the geofence emits one signal per vehicle, the driver expands it
+        to whichever case(s) are currently watching that vin.
+        """
+        ...
+
+    def list_by_customer_phone(self, phone: str) -> Iterable[Case]:
+        """Return non-terminal cases for a given customer phone number.
+
+        Drives opt-out routing (``CustomerOptedOut`` / ``CustomerOptedIn``):
+        Twilio webhooks know the phone but not the case, the driver
+        resolves to the right case(s) here.
+        """
+        ...
+
     def update_state(self, case_id: CaseId, *, new_state: CaseState) -> Case:
         """Atomic state transition. Returns the updated Case."""
         ...
@@ -61,6 +90,7 @@ class CaseRepository(Protocol):
         new_state: CaseState,
         outcome_detail: str,
         booked_slot_id: SlotId | None,
+        booked_slot_display: str = "",
         closed_at: datetime,
     ) -> Case:
         """Set terminal outcome fields together with the terminal state."""
@@ -117,6 +147,23 @@ class _JsonFileCaseRepository:
         cases = sorted(self._iter_all(), key=lambda c: c.created_at, reverse=True)
         return tuple(cases[:limit])
 
+    def list_active(self) -> Iterable[Case]:
+        return tuple(c for c in self._iter_all() if not c.state.is_terminal)
+
+    def list_by_vehicle_vin(self, vin: VehicleVin) -> Iterable[Case]:
+        return tuple(
+            c
+            for c in self._iter_all()
+            if c.vehicle.vin == vin and not c.state.is_terminal
+        )
+
+    def list_by_customer_phone(self, phone: str) -> Iterable[Case]:
+        return tuple(
+            c
+            for c in self._iter_all()
+            if c.customer.phone == phone and not c.state.is_terminal
+        )
+
     def update_state(self, case_id: CaseId, *, new_state: CaseState) -> Case:
         case = self.get(case_id)
         updated = case.model_copy(update={"state": new_state})
@@ -130,6 +177,7 @@ class _JsonFileCaseRepository:
         new_state: CaseState,
         outcome_detail: str,
         booked_slot_id: SlotId | None,
+        booked_slot_display: str = "",
         closed_at: datetime,
     ) -> Case:
         case = self.get(case_id)
@@ -138,6 +186,7 @@ class _JsonFileCaseRepository:
                 "state": new_state,
                 "outcome_detail": outcome_detail,
                 "booked_slot_id": booked_slot_id,
+                "booked_slot_display": booked_slot_display,
                 "closed_at": closed_at,
             }
         )

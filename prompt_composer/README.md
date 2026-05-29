@@ -39,6 +39,7 @@ from prompt_composer import PromptPaths
 
 paths = PromptPaths(
     system=Path("11Labs/config/system-prompt.md"),
+    post_booking=Path("11Labs/config/prompt-post-booking.md"),
     voice=Path("11Labs/config/voice.md"),
     sms=Path("sms_adapter/config/sms.md"),
 )
@@ -47,14 +48,25 @@ paths = PromptPaths(
 ## Usage
 
 ```python
-from prompt_composer import build_prompt, Channel
+from prompt_composer import build_prompt, Channel, PromptStage
 
-rendered = build_prompt(case=case, channel=Channel.SMS, paths=paths)
-rendered.text          # str  — system + sms.md, vars substituted
+rendered = build_prompt(
+    case=case,
+    channel=Channel.SMS,
+    stage=PromptStage.INITIAL_REMINDER,
+    paths=paths,
+)
+rendered.text          # str  — stage prompt + sms.md, vars substituted
 rendered.variables     # dict — same dict ElevenLabs gets
 rendered.channel       # Channel.SMS
+rendered.stage         # PromptStage.INITIAL_REMINDER
 rendered.placeholders_used  # frozenset[str]
 ```
+
+Stage routing:
+
+- ``OUTREACH`` → ``system`` (``system-prompt.md``)
+- ``INITIAL_REMINDER`` / ``FINAL_REMINDER`` / ``FEEDBACK`` → ``post_booking`` (``prompt-post-booking.md``)
 
 `case` is anything with `to_variables() -> dict[str, str]`. In practice,
 `guidepoint.case.Case`. The composer doesn't depend on `guidepoint`; it
