@@ -89,6 +89,30 @@ class ConnectionStatus(BaseModel):
     detail: str = ""
 
 
+class SlotInput(BaseModel):
+    """One row from the simulator's slot picker.
+
+    The browser sends only the local-naive datetime the operator picked
+    (``"2026-06-09T08:30"``). The server combines this with the
+    dealer's IANA timezone to derive the canonical
+    :class:`OfferedSlot` (id + UTC ``starts_at`` + formatted display).
+
+    Keeping the input shape minimal is intentional: humans should not
+    have to invent slot ids or format display strings — that's the
+    server's job.
+    """
+
+    model_config = _frozen_strict()
+
+    starts_at_local: str = Field(
+        min_length=1,
+        description=(
+            "Dealer-local wall-clock time as emitted by an HTML "
+            "<input type=\"datetime-local\"> (YYYY-MM-DDTHH:MM)."
+        ),
+    )
+
+
 class MasterDataSnapshot(BaseModel):
     """One-shot snapshot of the editable master data on page boot.
 
@@ -113,4 +137,5 @@ __all__ = [
     "FireRequest",
     "FireResponse",
     "MasterDataSnapshot",
+    "SlotInput",
 ]

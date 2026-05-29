@@ -171,19 +171,27 @@ class TestSlotsApi:
         assert {s["id"] for s in body} == {"slot_a", "slot_b"}
 
     def test_put_overwrites_disk(self, client: UserClient, tmp_path: Path) -> None:
-        new_slots = [
-            {
-                "id": "slot_x",
-                "starts_at": "2026-05-14T15:00:00Z",
-                "display": "Thursday, May 14 - 11:00 AM",
-            }
-        ]
+        # New shape: operator only sends local-naive datetimes. The
+        # server derives id (slot_YYYY_MM_DD_HHMM), UTC starts_at, and
+        # the display string using the dealer's timezone.
+        new_slots = [{"starts_at_local": "2026-06-09T08:30"}]
         res = client.put("/api/slots", json=new_slots)
-        assert res.status_code == 200
+        assert res.status_code == 200, res.text
         on_disk = json.loads(
             (tmp_path / "data" / "users" / TEST_USER / "slots.json").read_text("utf-8")
         )
-        assert [s["id"] for s in on_disk] == ["slot_x"]
+        assert [s["id"] for s in on_disk] == ["slot_2026_06_09_0830"]
+        # Display is server-formatted in dealer-local time.
+        assert on_disk[0]["display"] == "Tuesday, June 9, 2026 - 8:30 AM"
+        # starts_at is UTC (EDT in June is -04:00 → 12:30Z).
+        assert on_disk[0]["starts_at"].startswith("2026-06-09T12:30:00")
+
+    def test_put_rejects_malformed_local_time(self, client: UserClient) -> None:
+        res = client.put(
+            "/api/slots", json=[{"starts_at_local": "yesterday"}]
+        )
+        assert res.status_code == 400
+        assert "starts_at_local" in res.text
 
 
 class TestConnection:

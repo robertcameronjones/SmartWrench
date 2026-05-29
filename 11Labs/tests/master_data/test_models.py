@@ -90,6 +90,27 @@ class TestDealerRecord:
                 ride_radius_miles=-1,
             )
 
+    def test_timezone_defaults_to_detroit(self) -> None:
+        d = DealerRecord(
+            id=DealerId("d"),
+            name="x",
+            phone="5550000",
+            address="1 Main St",
+            ride_radius_miles=10,
+        )
+        assert d.timezone == "America/Detroit"
+
+    def test_timezone_overridable(self) -> None:
+        d = DealerRecord(
+            id=DealerId("d"),
+            name="x",
+            phone="5550000",
+            address="1 Main St",
+            ride_radius_miles=10,
+            timezone="America/Los_Angeles",
+        )
+        assert d.timezone == "America/Los_Angeles"
+
 
 class TestVehicleRecord:
     def test_round_trip(self) -> None:

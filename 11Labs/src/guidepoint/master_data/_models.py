@@ -96,6 +96,11 @@ class DealerRecord(BaseModel):
     phone: str = Field(min_length=7)
     address: str = Field(min_length=1)
     ride_radius_miles: int = Field(ge=0, le=500)
+    # IANA timezone name (e.g. "America/Detroit"). Drives all dealer-local
+    # date/time rendering — slot pickers, display strings, future
+    # business-hours gating. Defaults to America/Detroit because that's
+    # where the demo dealer lives; production records must set their own.
+    timezone: str = Field(default="America/Detroit", min_length=3)
 
 
 class VehicleRecord(BaseModel):

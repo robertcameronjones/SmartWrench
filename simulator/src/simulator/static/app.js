@@ -138,7 +138,39 @@ async function saveEntity(entity, urlBuilder) {
   addLogLocal("info", `${entity}.saved`, url);
 }
 
-// ---------- slots editor (small list, custom UI) ------------------------
+// ---------- slots editor (datetime-local picker only) -------------------
+//
+// The operator picks dealer-local wall-clock time. The server derives the
+// slot id, UTC starts_at, and display string from that + dealer.timezone.
+// Humans only ever touch the date/time picker.
+
+function dealerTimezone() {
+  return (state.dealer && state.dealer.timezone) || "America/Detroit";
+}
+
+// Convert a UTC ISO string ("2026-06-09T12:30:00Z") to the value an
+// HTML <input type="datetime-local"> expects ("2026-06-09T08:30"),
+// rendered in the dealer's timezone.
+function utcIsoToPickerValue(utcIso) {
+  if (!utcIso) return "";
+  const d = new Date(utcIso);
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: dealerTimezone(),
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    })
+      .formatToParts(d)
+      .map((p) => [p.type, p.value]),
+  );
+  // hour12: false in en-US emits "24" instead of "00" at midnight.
+  const hh = parts.hour === "24" ? "00" : parts.hour;
+  return `${parts.year}-${parts.month}-${parts.day}T${hh}:${parts.minute}`;
+}
 
 function renderSlots() {
   const list = $("#slots-editor");
@@ -147,14 +179,14 @@ function renderSlots() {
     const li = document.createElement("li");
     li.className = "slot-row";
     li.innerHTML = `
-      <input data-slot-field="id" placeholder="slot id" />
-      <input data-slot-field="starts_at" placeholder="ISO start (e.g. 2026-05-12T12:30:00Z)" />
-      <input data-slot-field="display" placeholder='display string ("Tuesday, May 12, 2026 - 8:30 AM")' />
+      <input type="datetime-local" data-slot-field="starts_at_local" />
+      <span class="slot-display" data-slot-field="display"></span>
       <button type="button" class="btn btn-ghost slot-del" title="Remove">x</button>
     `;
-    li.querySelector('[data-slot-field="id"]').value = slot.id || "";
-    li.querySelector('[data-slot-field="starts_at"]').value = slot.starts_at || "";
-    li.querySelector('[data-slot-field="display"]').value = slot.display || "";
+    li.querySelector('[data-slot-field="starts_at_local"]').value =
+      utcIsoToPickerValue(slot.starts_at);
+    li.querySelector('[data-slot-field="display"]').textContent =
+      slot.display || "";
     li.querySelector(".slot-del").addEventListener("click", () => {
       state.slots.splice(idx, 1);
       renderSlots();
@@ -165,11 +197,13 @@ function renderSlots() {
 }
 
 function readSlotsFromUI() {
-  return $$('#slots-editor .slot-row').map((row) => ({
-    id: row.querySelector('[data-slot-field="id"]').value.trim(),
-    starts_at: row.querySelector('[data-slot-field="starts_at"]').value.trim(),
-    display: row.querySelector('[data-slot-field="display"]').value.trim(),
-  }));
+  return $$('#slots-editor .slot-row')
+    .map((row) => ({
+      starts_at_local: row
+        .querySelector('[data-slot-field="starts_at_local"]')
+        .value.trim(),
+    }))
+    .filter((s) => s.starts_at_local);
 }
 
 async function saveSlots() {
@@ -503,6 +537,9 @@ function init() {
   });
 
   $("#add-slot").addEventListener("click", () => {
+    // New slot defaults to "(empty)" — the picker stays blank until
+    // the operator opens it. Save is a no-op for blank rows
+    // (readSlotsFromUI filters them).
     state.slots.push({ id: "", starts_at: "", display: "" });
     renderSlots();
   });

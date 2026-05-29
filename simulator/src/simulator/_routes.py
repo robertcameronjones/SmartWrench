@@ -78,8 +78,10 @@ from simulator._models import (
     FireRequest,
     FireResponse,
     MasterDataSnapshot,
+    SlotInput,
 )
 from simulator._sim_controls import ensure_geofence_subscription
+from simulator._slots import derive_offered_slot
 from simulator._users import UserContext, get_user_context
 from sms_adapter import SmsConsentChecker
 
@@ -308,11 +310,48 @@ def _get_slots(
 
 
 def _put_slots(
-    slots: list[OfferedSlot],
+    slots: list[SlotInput],
     ctx: UserContext = Depends(get_user_context),
 ) -> list[OfferedSlot]:
-    saved = ctx.slots_repo.save(slots)
-    _log.info("simulator.slots.saved", user_id=ctx.user.id, count=len(saved))
+    """Accept operator-friendly local-time picker input; derive the rest.
+
+    The UI sends just ``[{"starts_at_local": "2026-06-09T08:30"}, ...]``.
+    The server derives ``id`` (stable from the local time), ``starts_at``
+    (UTC), and ``display`` (formatted in the dealer's timezone). The
+    on-disk shape is still the full :class:`OfferedSlot` so the reducer
+    and prompts consume it unchanged.
+    """
+
+    try:
+        dealer = _first_or_404(
+            ctx.master_data.list_dealers(),
+            detail=f"no dealer fixtures for user {ctx.user.id!r}",
+        )
+    except MasterDataError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    tz_name = dealer.timezone
+    derived: list[OfferedSlot] = []
+    for idx, raw in enumerate(slots):
+        try:
+            derived.append(
+                derive_offered_slot(
+                    starts_at_local=raw.starts_at_local, tz_name=tz_name
+                )
+            )
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=f"slot {idx}: {exc}",
+            ) from exc
+
+    saved = ctx.slots_repo.save(derived)
+    _log.info(
+        "simulator.slots.saved",
+        user_id=ctx.user.id,
+        count=len(saved),
+        dealer_timezone=tz_name,
+    )
     return list(saved)
 
 
