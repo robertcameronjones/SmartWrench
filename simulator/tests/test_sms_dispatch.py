@@ -64,12 +64,14 @@ class FakeTwilio:
     """Records every outbound SMS; returns a deterministic fake SID."""
 
     sent: list[tuple[str, str]] = field(default_factory=list)
+    case_ids: list[str] = field(default_factory=list)
     counter: int = 0
 
-    def __call__(self, *, to: str, body: str) -> str:
+    def __call__(self, *, case_id: str, to: str, body: str) -> str:
         self.counter += 1
         sid = f"SM{self.counter:032x}"
         self.sent.append((to, body))
+        self.case_ids.append(str(case_id))
         return sid
 
 

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Protocol, final
 
+from guidepoint.case._models import CaseId
+
 from sms_adapter import TwilioSend
 
 
@@ -25,10 +27,10 @@ def build_gated_twilio_sender(
 ) -> TwilioSend:
     """Wrap ``inner`` so sends are rejected when consent is withdrawn."""
 
-    def _send(*, to: str, body: str) -> str:
+    def _send(*, case_id: CaseId, to: str, body: str) -> str:
         if not consent.sms_consent_for_phone(to):
             raise SmsConsentError(f"SMS blocked: customer {to!r} has opted out")
-        return inner(to=to, body=body)
+        return inner(case_id=case_id, to=to, body=body)
 
     return _send
 

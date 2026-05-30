@@ -83,7 +83,8 @@ def _prompt_paths() -> PromptPaths:
 class FakeTwilio:
     sent: list[tuple[str, str]] = field(default_factory=list)
 
-    def __call__(self, *, to: str, body: str) -> str:
+    def __call__(self, *, case_id: str, to: str, body: str) -> str:
+        del case_id
         self.sent.append((to, body))
         return f"SM{len(self.sent):032x}"
 

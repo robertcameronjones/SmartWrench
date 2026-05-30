@@ -494,7 +494,10 @@ class SmsCallSession:
         """Compose the opening prompt, ask the LLM, send via Twilio, persist."""
         reply = await asyncio.to_thread(self._take_turn, case, stage)
         sid = await asyncio.to_thread(
-            self._twilio_send, to=case.customer.phone, body=reply
+            self._twilio_send,
+            case_id=case.case_id,
+            to=case.customer.phone,
+            body=reply,
         )
         log_event(
             self._event_log_path,
@@ -634,7 +637,10 @@ class SmsCallSession:
                 return "inconclusive", None, detail
             try:
                 sid = await asyncio.to_thread(
-                    self._twilio_send, to=case.customer.phone, body=reply
+                    self._twilio_send,
+                    case_id=case.case_id,
+                    to=case.customer.phone,
+                    body=reply,
                 )
             except Exception as exc:
                 detail = f"{type(exc).__name__}: {exc}"
@@ -710,7 +716,10 @@ class SmsCallSession:
             return
         try:
             sid = await asyncio.to_thread(
-                self._twilio_send, to=case.customer.phone, body=reply
+                self._twilio_send,
+                case_id=case.case_id,
+                to=case.customer.phone,
+                body=reply,
             )
         except Exception as exc:
             _log.warning(

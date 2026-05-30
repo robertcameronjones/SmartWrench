@@ -113,6 +113,15 @@ class SimulatorWorldState:
     def set_business_hours(self, *, open: bool) -> None:
         self.business_hours_open = open
 
+    def hours_open(self) -> bool:
+        """:class:`BusinessHoursPort` protocol method.
+
+        Lets the outbound worker read this slider directly without
+        knowing about :class:`SimulatorWorldState`. In production this
+        would consult dealer hours of operation + holiday calendar.
+        """
+        return self.business_hours_open
+
 
 def build_geofence_forwarder(
     *,

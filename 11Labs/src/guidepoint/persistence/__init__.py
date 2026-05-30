@@ -16,7 +16,14 @@ from guidepoint.case._repository import (
     build_json_case_repository,
 )
 from guidepoint.persistence._migrate_from_json import migrate_cases_json_to_sqlite
+from guidepoint.persistence._outbound import (
+    OutboundItem,
+    OutboundKind,
+    OutboundQueue,
+    OutboundState,
+)
 from guidepoint.persistence.sqlite._case_repo import build_sqlite_case_repository
+from guidepoint.persistence.sqlite._outbound_queue import build_sqlite_outbound_queue
 
 PersistenceBackend = str
 
@@ -65,7 +72,12 @@ def _sqlite_is_empty(db_path: Path) -> bool:
 
 
 __all__ = [
+    "OutboundItem",
+    "OutboundKind",
+    "OutboundQueue",
+    "OutboundState",
     "PersistenceBackend",
     "build_case_repository",
+    "build_sqlite_outbound_queue",
     "migrate_cases_json_to_sqlite",
 ]

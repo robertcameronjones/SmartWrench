@@ -617,7 +617,10 @@ def test_vehicle_exited_dealer_completes_case_no_feedback_sms() -> None:
     """Per the dictated state machine: SHOWED + geofence-out → terminal.
 
     No feedback touchpoint. The customer is not asked to fill out a
-    survey by the core workflow.
+    survey by the core workflow. The audit trail gets both the raw
+    geofence event AND an explicit ``case.closed.service_event_complete``
+    marker so operators can see the case ended cleanly without
+    parsing geofence detail strings.
     """
 
     case = _case(state=CaseState.SHOWED, attempt_count=3)
@@ -629,6 +632,10 @@ def test_vehicle_exited_dealer_completes_case_no_feedback_sms() -> None:
     assert decision.next_state == CaseState.COMPLETED
     calls = [a for a in decision.actions if isinstance(a, PlaceCall)]
     assert calls == []
+    record_events = [a for a in decision.actions if isinstance(a, RecordEvent)]
+    event_names = {a.event for a in record_events}
+    assert "case.geofence.exited" in event_names
+    assert "case.closed.service_event_complete" in event_names
 
 
 def test_end_of_day_in_final_reminder_sent_marks_no_show() -> None:

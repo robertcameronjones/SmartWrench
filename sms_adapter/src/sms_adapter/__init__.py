@@ -37,6 +37,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Protocol, final
 
+from guidepoint.case._models import CaseId
 from prompt_composer import PromptPaths, PromptStage
 
 __all__: list[str] = []
@@ -76,9 +77,15 @@ class Turn:
 
 
 class TwilioSend(Protocol):
-    """Send one outbound SMS. Returns the Twilio message SID."""
+    """Send one outbound SMS for a given case. Returns the Twilio MessageSid.
 
-    def __call__(self, *, to: str, body: str) -> str: ...
+    ``case_id`` is metadata: the live Twilio sender ignores it, but the
+    queue-backed sender uses it to persist a per-case audit row. Every
+    outbound is for exactly one case in v2, so it's always available at
+    the call site.
+    """
+
+    def __call__(self, *, case_id: CaseId, to: str, body: str) -> str: ...
 
 
 class LlmComplete(Protocol):
@@ -160,6 +167,10 @@ from sms_adapter._gated_twilio import (  # noqa: E402
     build_gated_twilio_sender,
 )
 from sms_adapter._llm import build_litellm_completer  # noqa: E402
+from sms_adapter._queued_twilio import (  # noqa: E402
+    QueueWaitTimeout,
+    build_queued_twilio_sender,
+)
 from sms_adapter._optout import (  # noqa: E402
     is_opt_in_keyword,
     is_opt_out_keyword,
@@ -190,10 +201,12 @@ __all__ = [
     "build_json_routing_store",
     "build_gated_twilio_sender",
     "build_litellm_completer",
+    "build_queued_twilio_sender",
     "build_twilio_sender",
     "is_opt_in_keyword",
     "is_opt_out_keyword",
     "normalize_sms_body",
+    "QueueWaitTimeout",
     "SmsConsentChecker",
     "SmsConsentError",
 ]

@@ -70,6 +70,7 @@ from simulator._basic_auth import BasicAuthMiddleware
 from simulator._connection import ConnectionProbe, build_env_connection_probe
 from simulator._consent import ProjectSmsConsentChecker
 from simulator._ephemeral_triggers import EphemeralTriggerSource
+from simulator._outbound_setup import OutboundBundle, build_outbound_dispatch
 from simulator._routes import (
     RouteDeps,
     build_router,
@@ -152,14 +153,30 @@ def build_app(
         user_registry=resolved_user_registry,
     )
 
+    world_state = SimulatorWorldState()
+
+    # Outbound dispatch — SQLite queue + drainer worker. Lives one
+    # layer below the SMS session: the queue holds items, the worker
+    # applies consent + business-hours gates and calls Twilio, the
+    # queued sender (consumed by SmsCallSession via build_sms_session)
+    # enqueues and waits. Tests that inject ``sms_session`` directly
+    # skip this whole pipeline.
+    outbound_bundle: OutboundBundle | None = None
     if sms_session is None and sms_routing is None:
-        sms_session, sms_routing = build_sms_session(
+        outbound_bundle = build_outbound_dispatch(
             project_root=project_root,
-            case_repo=resolved_case_repo,
-            bus=resolved_bus,
             clock=resolved_clock,
-            consent_checker=sms_consent_checker,
+            consent=sms_consent_checker,
+            hours=world_state,
         )
+        if outbound_bundle is not None:
+            sms_session, sms_routing = build_sms_session(
+                project_root=project_root,
+                case_repo=resolved_case_repo,
+                bus=resolved_bus,
+                clock=resolved_clock,
+                twilio_send=outbound_bundle.sender,
+            )
 
     if sms_session is not None:
         call_sessions["sms"] = sms_session
@@ -197,7 +214,6 @@ def build_app(
     )
     driver_holder["driver"] = case_driver
 
-    world_state = SimulatorWorldState()
     geofence_forwarder = build_geofence_forwarder(
         case_driver=case_driver,
         clock=resolved_clock,
@@ -220,8 +236,16 @@ def build_app(
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         count = await case_driver.recover_in_flight()
         _log.info("simulator.startup.recovered", count=count)
-        yield
-        await case_driver.shutdown()
+        if outbound_bundle is not None:
+            await outbound_bundle.worker.start()
+            _log.info("simulator.outbound.worker.started")
+        try:
+            yield
+        finally:
+            if outbound_bundle is not None:
+                await outbound_bundle.worker.stop()
+                _log.info("simulator.outbound.worker.stopped")
+            await case_driver.shutdown()
 
     app = FastAPI(
         title="Guidepoint Simulator",
@@ -241,6 +265,10 @@ def build_app(
     app.state.geofence_forwarder = geofence_forwarder
     app.state.geofence_subscribed = geofence_subscribed
     app.state.active_vehicle_vin = ""
+    app.state.outbound_bundle = outbound_bundle
+    app.state.outbound_queue = (
+        outbound_bundle.queue if outbound_bundle is not None else None
+    )
 
     app.add_middleware(BasicAuthMiddleware)
     router = build_router(deps=deps)

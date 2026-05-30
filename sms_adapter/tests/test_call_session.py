@@ -70,11 +70,13 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 @dataclass
 class FakeTwilio:
     sent: list[tuple[str, str]] = field(default_factory=list)
+    case_ids: list[str] = field(default_factory=list)
     counter: int = 0
 
-    def __call__(self, *, to: str, body: str) -> str:
+    def __call__(self, *, case_id: str, to: str, body: str) -> str:
         self.counter += 1
         self.sent.append((to, body))
+        self.case_ids.append(str(case_id))
         return f"SM{self.counter:032x}"
 
 

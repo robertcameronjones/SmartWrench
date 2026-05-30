@@ -866,9 +866,17 @@ def _on_vehicle_entered(case: Case) -> CaseDecision:
 def _on_vehicle_exited(case: Case) -> CaseDecision:
     """Vehicle crossed out of the dealer geofence — service event complete.
 
-    Per the dictated state machine: SHOWED + geofence-out → terminal. No
-    feedback touchpoint. Customer is not pestered for a survey by the core
-    workflow.
+    Per the dictated state machine: SHOWED + geofence-out → terminal.
+    No feedback touchpoint; the customer is not pestered for a survey
+    by the core workflow.
+
+    Two log events are emitted so the audit trail is unambiguous:
+
+    - ``case.geofence.exited`` — the physical-world signal (mirror of
+      ``case.geofence.entered`` on the way in).
+    - ``case.closed.service_event_complete`` — the terminal marker that
+      lets operators / log scrapers see "this case ended cleanly via the
+      happy path" without parsing geofence detail strings.
     """
 
     if case.state != CaseState.SHOWED:
@@ -880,11 +888,15 @@ def _on_vehicle_exited(case: Case) -> CaseDecision:
             RecordEvent(
                 case_id=case.case_id,
                 event="case.geofence.exited",
-                detail="vehicle exited dealer — service event complete",
+                detail="vehicle exited dealer geofence",
+            ),
+            RecordEvent(
+                case_id=case.case_id,
+                event="case.closed.service_event_complete",
+                detail="service event complete; case closed via geofence-out",
             ),
         ),
-        patch=CasePatch(increment_attempt_count=True),
-        reason="service_complete_request_feedback",
+        reason="service_event_complete",
     )
 
 

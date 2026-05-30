@@ -1,20 +1,24 @@
 """Build the SMS ``CallSession`` (and routing store reference) from env + disk.
 
-One job: assemble the live :class:`SmsCallSession` (Twilio sender,
-LiteLLM completer, JSON history store, JSON routing store, prompt
-paths) and return it along with the routing store. The webhook
-handler in ``simulator._app`` needs the routing store to translate
-``phone -> case_id`` for inbound texts.
+One job: assemble the live :class:`SmsCallSession` (LiteLLM completer,
+JSON history store, JSON routing store, prompt paths) wired to an
+externally-supplied :class:`TwilioSend` and return it along with the
+routing store. The webhook handler in ``simulator._app`` needs the
+routing store to translate ``phone -> case_id`` for inbound texts.
 
-Returns ``(None, None)`` if the SMS env vars aren't set so the
-simulator boots fine for voice-only operators; the Fire route
-surfaces a 503 if the operator picks channel=sms in that state.
+Returns ``(None, None)`` if the SMS env vars aren't set or no sender
+was supplied, so the simulator boots fine for voice-only operators;
+the Fire route surfaces a 503 if the operator picks channel=sms in
+that state.
+
+The :class:`TwilioSend` is supplied by the caller (typically the
+queue-backed sender from :mod:`simulator._outbound_setup`). This
+module no longer constructs the live Twilio sender directly — that
+moved to ``_outbound_setup`` along with the worker that drains the
+outbound queue. Tests can also pass an injected fake sender.
 
 Required env vars for SMS (already present in ``sms/.env`` +
 ``llm/.env`` from the existing standalone tools):
-- ``TWILIO_ACCOUNT_SID``      (AC...)
-- ``TWILIO_AUTH_TOKEN``
-- ``TWILIO_FROM_NUMBER``      (E.164, e.g. +13135551212)
 - ``OPENROUTER_API_KEY``      (or whatever provider env LiteLLM needs
                                for the chosen model)
 
@@ -39,13 +43,11 @@ from prompt_composer import PromptPaths
 from sms_adapter import (
     RoutingStore,
     SmsCallSession,
-    SmsConsentChecker,
-    build_gated_twilio_sender,
+    TwilioSend,
     build_json_history_store,
     build_json_routing_store,
     build_litellm_completer,
     build_sms_call_session,
-    build_twilio_sender,
 )
 
 _log = structlog.get_logger(__name__)
@@ -57,36 +59,25 @@ def build_sms_session(
     case_repo: CaseRepository,
     bus: EventBus[CaseEvent],
     clock: Clock,
-    consent_checker: SmsConsentChecker | None = None,
+    twilio_send: TwilioSend | None,
 ) -> tuple[SmsCallSession | None, RoutingStore | None]:
     """Compose the live :class:`SmsCallSession` + its routing store, or ``(None, None)``.
 
     The routing store is returned alongside so the inbound webhook
     handler can translate ``phone -> case_id`` without reaching into
-    the session's internals. Returns ``(None, None)`` when any
-    required env var is missing — the Fire route surfaces a 503 if
-    the operator selects channel=sms in that state, but voice still
-    works.
+    the session's internals.
+
+    Pass ``twilio_send=None`` (or omit at the caller) to disable SMS
+    — the function returns ``(None, None)`` and the Fire route 503s on
+    channel=sms.
     """
-    account_sid = (os.environ.get("TWILIO_ACCOUNT_SID") or "").strip()
-    auth_token = (os.environ.get("TWILIO_AUTH_TOKEN") or "").strip()
-    from_number = (os.environ.get("TWILIO_FROM_NUMBER") or "").strip()
+    if twilio_send is None:
+        _log.warning("simulator.sms.disabled", reason="no twilio_send supplied")
+        return None, None
+
     # Default to the model the operator already round-tripped via the
     # llm/ chat CLI. Overridable with LLM_MODEL=... .
     model = (os.environ.get("LLM_MODEL") or "openrouter/openai/gpt-oss-20b:free").strip()
-
-    missing = [
-        name
-        for name, value in (
-            ("TWILIO_ACCOUNT_SID", account_sid),
-            ("TWILIO_AUTH_TOKEN", auth_token),
-            ("TWILIO_FROM_NUMBER", from_number),
-        )
-        if not value
-    ]
-    if missing:
-        _log.warning("simulator.sms.disabled", missing_env=missing)
-        return None, None
 
     data_dir = Path(os.environ.get("SMS_DATA_DIR") or (project_root / "data" / "sms"))
     history_dir = data_dir / "history"
@@ -108,16 +99,6 @@ def build_sms_session(
 
     history = build_json_history_store(root=history_dir)
     routing = build_json_routing_store(path=routing_path)
-    twilio_send = build_twilio_sender(
-        account_sid=account_sid,
-        auth_token=auth_token,
-        from_number=from_number,
-    )
-    if consent_checker is not None:
-        twilio_send = build_gated_twilio_sender(
-            inner=twilio_send,
-            consent=consent_checker,
-        )
     session = build_sms_call_session(
         twilio_send=twilio_send,
         llm_complete=build_litellm_completer(model=model, event_log_path=event_log_path),
@@ -131,7 +112,6 @@ def build_sms_session(
     )
     _log.info(
         "simulator.sms.enabled",
-        from_number=from_number,
         model=model,
         history_dir=str(history_dir),
         routing_path=str(routing_path),

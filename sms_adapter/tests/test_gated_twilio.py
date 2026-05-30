@@ -21,22 +21,22 @@ class _FakeConsent:
 
 
 def test_gated_sender_passes_when_consent_true() -> None:
-    sent: list[tuple[str, str]] = []
+    sent: list[tuple[str, str, str]] = []
 
-    def _inner(*, to: str, body: str) -> str:
-        sent.append((to, body))
+    def _inner(*, case_id: str, to: str, body: str) -> str:
+        sent.append((case_id, to, body))
         return "SM123"
 
     sender = build_gated_twilio_sender(inner=_inner, consent=_FakeConsent(allowed=True))
-    sid = sender(to="+13135550000", body="hello")
+    sid = sender(case_id="case_abc", to="+13135550000", body="hello")
     assert sid == "SM123"
-    assert sent == [("+13135550000", "hello")]
+    assert sent == [("case_abc", "+13135550000", "hello")]
 
 
 def test_gated_sender_blocks_when_consent_false() -> None:
     sender = build_gated_twilio_sender(
-        inner=lambda *, to, body: "SM123",
+        inner=lambda *, case_id, to, body: "SM123",
         consent=_FakeConsent(allowed=False),
     )
     with pytest.raises(SmsConsentError, match="opted out"):
-        sender(to="+13135550000", body="hello")
+        sender(case_id="case_abc", to="+13135550000", body="hello")

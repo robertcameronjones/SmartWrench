@@ -2,23 +2,23 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Case state jump table</title>
+<title>Case state jump table — as implemented</title>
 <style>
-  @page { size: letter landscape; margin: 0.45in; }
+  @page { size: letter landscape; margin: 0.4in; }
   :root {
     --ink: #111;
     --ink-soft: #555;
+    --ink-faint: #777;
     --line: #999;
     --line-soft: #ccc;
     --bg-cell: #fafafa;
     --bg-head: #eee;
+    --bg-state-head: #e8eef5;
     --bg-term: #fff4f0;
     --bg-cross: #f0f6ff;
-    --bg-legacy: #fff8e0;
-    --bg-pending: #fffaee;
-    --bg-question: #f4f0ff;
-    --rule-pending: #c08000;
-    --rule-question: #6a40b0;
+    --bg-defensive: #f7f5ee;
+    --bg-note: #fffaee;
+    --rule-note: #c08000;
   }
   html, body {
     margin: 0;
@@ -43,6 +43,11 @@
     padding-bottom: 2px;
     border-bottom: 1px solid var(--line);
   }
+  h3 {
+    font-size: 12px;
+    margin: 14px 0 4px;
+    color: var(--ink);
+  }
   table {
     width: 100%;
     border-collapse: collapse;
@@ -51,10 +56,11 @@
   }
   th, td {
     border: 1px solid var(--line-soft);
-    padding: 5px 8px;
+    padding: 4px 7px;
     vertical-align: top;
     text-align: left;
     word-wrap: break-word;
+    overflow-wrap: break-word;
   }
   th {
     background: var(--bg-head);
@@ -63,71 +69,36 @@
     text-transform: uppercase;
     letter-spacing: 0.3px;
   }
-  td.state, td.next, td.event {
+  td code, code {
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    font-size: 10.5px;
-    white-space: nowrap;
-  }
-  td.event {
-    white-space: normal;
-  }
-  td.guard {
-    font-size: 10.5px;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  }
-  td.guard .dash {
-    color: var(--ink-soft);
-  }
-  code {
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 10px;
     background: var(--bg-cell);
     padding: 0 3px;
     border-radius: 2px;
   }
+  td.event, td.guard, td.next, td.reason, td.actions {
+    font-size: 10px;
+  }
+  td.next { white-space: nowrap; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  td.event { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  td.guard { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  td.reason { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--ink-soft); }
+  td.actions code { background: transparent; padding: 0; }
+  .state-head td {
+    background: var(--bg-state-head);
+    font-weight: 600;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 11px;
+    padding-top: 6px;
+    padding-bottom: 6px;
+  }
   .terminal { background: var(--bg-term); }
   .terminal td.next { font-weight: 600; }
   .cross    { background: var(--bg-cross); }
-  .legacy   { background: var(--bg-legacy); }
+  .defensive { background: var(--bg-defensive); }
   .muted    { color: var(--ink-soft); font-style: italic; }
-  .group-sep td {
-    border-top: 2px solid var(--line);
-  }
-  .pending, .question {
-    padding: 8px 12px;
-    margin: 10px 0 18px;
-    border-radius: 3px;
-    font-size: 11px;
-  }
-  .pending {
-    background: var(--bg-pending);
-    border: 1px solid var(--rule-pending);
-  }
-  .pending h3 {
-    margin: 0 0 4px;
-    font-size: 12px;
-    color: var(--rule-pending);
-  }
-  .question {
-    background: var(--bg-question);
-    border: 1px solid var(--rule-question);
-  }
-  .question h3 {
-    margin: 0 0 4px;
-    font-size: 12px;
-    color: var(--rule-question);
-  }
-  .pending ol, .question ol {
-    margin: 4px 0 0;
-    padding-left: 20px;
-  }
-  .pending li, .question li { margin-bottom: 2px; }
-  ul.notes {
-    margin: 6px 0 0;
-    padding-left: 18px;
-    font-size: 10.5px;
-    color: var(--ink-soft);
-  }
-  ul.notes code { background: transparent; }
+  .faint    { color: var(--ink-faint); font-size: 9.5px; }
+  .dash { color: var(--ink-faint); }
   .legend {
     margin: 4px 0 10px;
     font-size: 10px;
@@ -142,156 +113,545 @@
   }
   .legend .terminal { background: var(--bg-term); }
   .legend .cross    { background: var(--bg-cross); }
-  .legend .legacy   { background: var(--bg-legacy); }
+  .legend .defensive { background: var(--bg-defensive); }
+  .note {
+    padding: 8px 12px;
+    margin: 10px 0 18px;
+    border-radius: 3px;
+    font-size: 11px;
+    background: var(--bg-note);
+    border: 1px solid var(--rule-note);
+  }
+  .note h3 { margin: 0 0 4px; font-size: 12px; color: var(--rule-note); }
+  ul.notes {
+    margin: 6px 0 0;
+    padding-left: 18px;
+    font-size: 10.5px;
+    color: var(--ink-soft);
+  }
+  ul.notes code { background: transparent; }
   @media print {
     body { padding: 0; }
-    h2 { page-break-after: avoid; }
+    h2, h3 { page-break-after: avoid; }
     tr { page-break-inside: avoid; }
-    .pending, .question { page-break-inside: avoid; }
+    .note { page-break-inside: avoid; }
     .source { color: #000; }
   }
 </style>
 </head>
 <body>
 
-<h1>Case state jump table</h1>
+<h1>Case state jump table — as implemented</h1>
 <p class="source">
-  Columns: <strong>State / Event / Guard / Next state</strong>. State semantics:
-  <code>*_DUE</code> = the reminder timer has fired and the reminder is owed —
-  the send queue is delivering it. <code>*_SENT</code> = the SMS has been
-  dispatched and we're awaiting the customer's reply. No guards in the
-  state machine (defensive integrity checks live inside the reducer but
-  do not branch transitions). "<em>unchanged</em>" = reducer returns a
-  no-op (same state, no actions).
+  Source of truth: <code>11Labs/src/guidepoint/case/_reducer.py</code> on
+  branch <code>v2</code>. Every row maps to a single branch in the reducer.
+  The reducer is total: any (state, signal) pair not listed in a state's
+  block is handled by the cross-cutting rules below, or by the implicit
+  rule "<em>anything else returns <code>ignored:&lt;why&gt;</code>, no state
+  change, no actions</em>".
 </p>
 
 <div class="legend">
-  <span class="cross">cross-cutting rule</span>
+  <span class="cross">cross-cutting (applies at every non-terminal state)</span>
   <span class="terminal">terminal transition / state</span>
-  <span class="legacy">legacy v1 only</span>
+  <span class="defensive">defensive branch (off-path but reducer is total)</span>
 </div>
 
-<div class="pending">
-  <h3>What's new in this revision (per your dictation)</h3>
-  <ol>
-    <li><strong>New state <code>BOOKING_COMPLETE</code></strong> between
-      <code>CONFIRMING_WITH_DEALER</code> and the reminders. <code>DealerConfirmed</code>
-      lands here with <strong>no guard</strong>.</li>
-    <li><strong><code>*_DUE</code> states re-oriented.</strong>
-      <code>INITIAL_REMINDER_DUE</code> = "24-hour-prior timer has fired,
-      reminder is owed." <code>FINAL_REMINDER_DUE</code> = "day-of timer has
-      fired (dates now match), reminder is owed." Send queue owns delivery
-      timing.</li>
-    <li><strong><code>*_SENT</code> states</strong> handle only the
-      decision-changing customer responses: <em>reschedule</em>,
-      <em>cancel</em>, <em>opt out</em>. Confirm / silence is a no-op.</li>
-    <li><strong>No-show triggers a reschedule.</strong> When the end-of-day
-      tick fires while still in <code>FINAL_REMINDER_SENT</code> with no
-      geofence-in, the case transitions to <code>RESCHEDULING</code>. No
-      <code>NO_SHOW</code> terminal state.</li>
-    <li><strong>Service event complete is the terminal happy path.</strong>
-      <code>SHOWED</code> + geofence-out → <code>SERVICE_EVENT_COMPLETE</code>.
-      <code>AWAITING_FEEDBACK</code> and <code>COMPLETED</code> are gone from
-      the v2 state machine.</li>
-    <li><strong>No guards anywhere.</strong> The previous "date comparison"
-      and "reschedule budget" guards are removed from the table. If we want
-      to keep them as reducer-internal integrity checks, they live as defensive
-      no-ops, not as transition branches.</li>
-  </ol>
-</div>
-
-<h2>Cross-cutting rules (apply at every non-terminal state)</h2>
+<h2>Constants referenced below</h2>
 <table>
   <colgroup>
-    <col style="width:20%">
-    <col style="width:26%">
-    <col style="width:28%">
-    <col style="width:26%">
+    <col style="width:30%">
+    <col style="width:18%">
+    <col style="width:52%">
   </colgroup>
   <thead>
-    <tr><th>State</th><th>Event</th><th>Guard</th><th>Next state</th></tr>
+    <tr><th>Name</th><th>Value</th><th>Meaning</th></tr>
   </thead>
   <tbody>
-    <tr class="cross"><td class="state"><em>any non-terminal</em></td><td class="event"><code>CustomerOptedOut</code></td><td class="guard"><span class="dash">—</span></td><td class="next">OPTED_OUT <span class="muted">(terminal)</span></td></tr>
-    <tr class="cross"><td class="state"><em>any non-terminal</em></td><td class="event"><code>CustomerOptedIn</code></td><td class="guard"><span class="dash">—</span></td><td class="next"><em>unchanged</em> <span class="muted">(flips consent flag only)</span></td></tr>
-    <tr class="cross"><td class="state"><em>any non-terminal</em></td><td class="event"><code>BusinessHoursClosed</code></td><td class="guard"><span class="dash">—</span></td><td class="next"><em>unchanged</em></td></tr>
-    <tr class="cross"><td class="state"><em>any non-terminal</em></td><td class="event"><code>TimerFired(name=<em>unrecognised</em>)</code></td><td class="guard"><span class="dash">—</span></td><td class="next"><em>unchanged</em></td></tr>
-    <tr class="cross"><td class="state"><em>any terminal</em></td><td class="event"><em>anything</em></td><td class="guard"><span class="dash">—</span></td><td class="next"><em>unchanged</em></td></tr>
+    <tr><td><code>MAX_CALL_ATTEMPTS</code></td><td><code>2</code></td><td>Per-stage retry budget on <code>inconclusive</code> call outcomes. Reducer issues <strong>one</strong> retry (attempt 2); a second inconclusive yields the stage-appropriate hold/terminal.</td></tr>
+    <tr><td><code>INITIAL_REMINDER_LEAD</code></td><td><code>timedelta(hours=24)</code></td><td>Initial-reminder fire offset from booked slot. Also used as the threshold for "is this slot far enough out to need an initial reminder?" at dealer-confirm time.</td></tr>
+    <tr><td><code>FINAL_REMINDER_LEAD</code></td><td><code>timedelta(hours=2)</code></td><td>Final (day-of) reminder fire offset from booked slot.</td></tr>
+    <tr><td><code>MAX_RESCHEDULES</code></td><td><code>1</code></td><td>Reschedule budget. A second reschedule request yields <code>RESCHEDULE_FAILED</code>.</td></tr>
+    <tr><td><code>TIMER_INITIAL_REMINDER</code></td><td><code>"initial_reminder"</code></td><td>Timer name fired by the driver to produce <code>InitialReminderDue</code>.</td></tr>
+    <tr><td><code>TIMER_FINAL_REMINDER</code></td><td><code>"final_reminder"</code></td><td>Timer name fired by the driver to produce <code>FinalReminderDue</code>.</td></tr>
+    <tr><td><code>TIMER_END_OF_DAY</code></td><td><code>"end_of_business_day"</code></td><td>Timer name fired by the driver to produce <code>EndOfBusinessDayReached</code>.</td></tr>
   </tbody>
 </table>
 
-<h2>Active state transitions</h2>
+<h2>Cross-cutting rules</h2>
 <table>
   <colgroup>
+    <col style="width:18%">
+    <col style="width:18%">
+    <col style="width:12%">
+    <col style="width:16%">
     <col style="width:22%">
-    <col style="width:30%">
-    <col style="width:22%">
-    <col style="width:26%">
+    <col style="width:14%">
   </colgroup>
   <thead>
-    <tr><th>State</th><th>Event</th><th>Guard</th><th>Next state</th></tr>
+    <tr><th>State</th><th>Event</th><th>Guard</th><th>Next state</th><th>Actions emitted</th><th>reason</th></tr>
   </thead>
   <tbody>
-
-    <tr><td class="state">CREATED</td><td class="event"><code>BusinessHoursOpened</code></td><td class="guard"><span class="dash">—</span></td><td class="next">CONTACTING_CUSTOMER</td></tr>
-
-    <tr class="group-sep"><td class="state">CONTACTING_CUSTOMER</td><td class="event"><code>CallEnded(outcome=booked)</code></td><td class="guard"><span class="dash">—</span></td><td class="next">CONFIRMING_WITH_DEALER</td></tr>
-    <tr><td class="state">CONTACTING_CUSTOMER</td><td class="event"><code>CallEnded(outcome=declined)</code></td><td class="guard"><span class="dash">—</span></td><td class="next terminal">DECLINED <span class="muted">(terminal)</span></td></tr>
-    <tr><td class="state">CONTACTING_CUSTOMER</td><td class="event"><code>CallEnded(outcome=inconclusive, transport=voice)</code></td><td class="guard"><span class="dash">—</span></td><td class="next">CONTACTING_CUSTOMER <span class="muted">(retry — emit another <code>PlaceCall</code>)</span></td></tr>
-    <tr><td class="state">CONTACTING_CUSTOMER</td><td class="event"><code>CallEnded(outcome=inconclusive, transport=sms)</code></td><td class="guard"><span class="dash">—</span></td><td class="next terminal">ABANDONED <span class="muted">(terminal — single-shot SMS, no nag)</span></td></tr>
-
-    <tr class="group-sep"><td class="state">CONFIRMING_WITH_DEALER</td><td class="event"><code>DealerConfirmed</code></td><td class="guard"><span class="dash">—</span></td><td class="next">BOOKING_COMPLETE <span class="muted">(arms both reminder timers)</span></td></tr>
-    <tr><td class="state">CONFIRMING_WITH_DEALER</td><td class="event"><code>DealerRejected</code></td><td class="guard"><span class="dash">—</span></td><td class="next">RESCHEDULING</td></tr>
-
-    <tr class="group-sep"><td class="state">BOOKING_COMPLETE</td><td class="event"><code>TimerFired(name=initial_reminder)</code> <span class="muted">("24h prior")</span></td><td class="guard"><span class="dash">—</span></td><td class="next">INITIAL_REMINDER_DUE</td></tr>
-    <tr><td class="state">BOOKING_COMPLETE</td><td class="event"><code>TimerFired(name=final_reminder)</code> <span class="muted">("dates match" / day-of)</span></td><td class="guard"><span class="dash">—</span></td><td class="next">FINAL_REMINDER_DUE</td></tr>
-
-    <tr class="group-sep"><td class="state">INITIAL_REMINDER_DUE</td><td class="event"><code>MessageDispatched(stage=initial)</code> <span class="muted">(send queue confirms delivery)</span></td><td class="guard"><span class="dash">—</span></td><td class="next">INITIAL_REMINDER_SENT</td></tr>
-
-    <tr class="group-sep"><td class="state">INITIAL_REMINDER_SENT</td><td class="event"><code>CallEnded(outcome=rescheduled)</code></td><td class="guard"><span class="dash">—</span></td><td class="next">RESCHEDULING</td></tr>
-    <tr><td class="state">INITIAL_REMINDER_SENT</td><td class="event"><code>CallEnded(outcome=cancelled)</code></td><td class="guard"><span class="dash">—</span></td><td class="next terminal">CANCELLED <span class="muted">(terminal)</span></td></tr>
-    <tr><td class="state">INITIAL_REMINDER_SENT</td><td class="event"><code>TimerFired(name=final_reminder)</code> <span class="muted">(day-of arrives while we're still here)</span></td><td class="guard"><span class="dash">—</span></td><td class="next">FINAL_REMINDER_DUE</td></tr>
-
-    <tr class="group-sep"><td class="state">RESCHEDULING</td><td class="event"><code>DealerSlotsListed</code></td><td class="guard"><span class="dash">—</span></td><td class="next">CONTACTING_CUSTOMER <span class="muted">(new outreach)</span></td></tr>
-    <tr><td class="state">RESCHEDULING</td><td class="event"><code>CallEnded(outcome=booked)</code></td><td class="guard"><span class="dash">—</span></td><td class="next">CONFIRMING_WITH_DEALER</td></tr>
-    <tr><td class="state">RESCHEDULING</td><td class="event"><code>CallEnded(outcome=cancelled)</code></td><td class="guard"><span class="dash">—</span></td><td class="next terminal">CANCELLED <span class="muted">(terminal)</span></td></tr>
-    <tr><td class="state">RESCHEDULING</td><td class="event"><code>CallEnded(outcome=inconclusive)</code></td><td class="guard"><span class="dash">—</span></td><td class="next terminal">ABANDONED <span class="muted">(terminal — graceful timeout)</span></td></tr>
-
-    <tr class="group-sep"><td class="state">FINAL_REMINDER_DUE</td><td class="event"><code>MessageDispatched(stage=final)</code> <span class="muted">(send queue confirms delivery)</span></td><td class="guard"><span class="dash">—</span></td><td class="next">FINAL_REMINDER_SENT</td></tr>
-
-    <tr class="group-sep"><td class="state">FINAL_REMINDER_SENT</td><td class="event"><code>CallEnded(outcome=rescheduled)</code></td><td class="guard"><span class="dash">—</span></td><td class="next">RESCHEDULING</td></tr>
-    <tr><td class="state">FINAL_REMINDER_SENT</td><td class="event"><code>CallEnded(outcome=cancelled)</code></td><td class="guard"><span class="dash">—</span></td><td class="next terminal">CANCELLED <span class="muted">(terminal)</span></td></tr>
-    <tr><td class="state">FINAL_REMINDER_SENT</td><td class="event"><code>VehicleEnteredDealer</code> <span class="muted">(geofence-in)</span></td><td class="guard"><span class="dash">—</span></td><td class="next">SHOWED</td></tr>
-    <tr><td class="state">FINAL_REMINDER_SENT</td><td class="event"><code>EndOfBusinessDayReached</code> <span class="muted">(no-show)</span></td><td class="guard"><span class="dash">—</span></td><td class="next">RESCHEDULING <span class="muted">(auto-reschedule)</span></td></tr>
-
-    <tr class="group-sep"><td class="state">SHOWED</td><td class="event"><code>VehicleExitedDealer</code> <span class="muted">(geofence-out)</span></td><td class="guard"><span class="dash">—</span></td><td class="next terminal">SERVICE_EVENT_COMPLETE <span class="muted">(terminal)</span></td></tr>
-
-  </tbody>
-</table>
-
-<h2>Send queue (delivery gate — lives outside the state machine)</h2>
-<table>
-  <colgroup>
-    <col style="width:24%">
-    <col style="width:30%">
-    <col style="width:46%">
-  </colgroup>
-  <thead>
-    <tr><th>Queue input</th><th>Delivery guard</th><th>Behavior</th></tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td class="state"><code>PlaceCall</code> action emitted by the reducer (any transport — voice or SMS)</td>
-      <td class="guard"><code>now</code> falls inside the dealer's <strong>business hours</strong>, in the dealer's local timezone</td>
-      <td>If the guard is true, dispatch the call immediately. If false, hold the action in the queue and release it at the next business-hours-open boundary. Calls never go out at 3 AM, regardless of when the reducer emitted them or when a timer fired.</td>
-    </tr>
-    <tr>
-      <td class="state"><code>PlaceCall</code> held in the queue when <code>CustomerOptedOut</code> fires</td>
+    <tr class="cross">
+      <td><em>any non-terminal</em></td>
+      <td class="event"><code>CustomerOptedOut</code></td>
       <td class="guard"><span class="dash">—</span></td>
-      <td>The held call may still go out (small bounded risk you accepted). The opt-out closes the case in the reducer; the queue does not need to inspect case state to suppress in-flight items for v1.</td>
+      <td class="next terminal">OPTED_OUT</td>
+      <td class="actions"><code>CancelTimer(initial_reminder)</code> + <code>CancelTimer(final_reminder)</code> + <code>CancelTimer(end_of_business_day)</code> + <code>RecordEvent("case.closed.opted_out", level=warn)</code></td>
+      <td class="reason">opt_out</td>
+    </tr>
+    <tr class="cross">
+      <td><em>any non-terminal</em></td>
+      <td class="event"><code>CustomerOptedIn</code></td>
+      <td class="guard"><span class="dash">—</span></td>
+      <td class="next"><em>unchanged</em></td>
+      <td class="actions">none <span class="muted">(consent flag flips on the customer record; the case stays put)</span></td>
+      <td class="reason">ignored:opt_in_does_not_revive_case</td>
+    </tr>
+    <tr class="cross">
+      <td><em>any non-terminal</em></td>
+      <td class="event"><code>BusinessHoursClosed</code></td>
+      <td class="guard"><span class="dash">—</span></td>
+      <td class="next"><em>unchanged</em></td>
+      <td class="actions">none</td>
+      <td class="reason">ignored:hours_closed_no_action_at_case_level</td>
+    </tr>
+    <tr class="cross">
+      <td><em>any non-terminal</em></td>
+      <td class="event"><code>TimerFired(name=*)</code></td>
+      <td class="guard"><span class="dash">—</span></td>
+      <td class="next"><em>unchanged</em></td>
+      <td class="actions">none <span class="muted">(placeholder; no v2 code emits this generic event)</span></td>
+      <td class="reason">ignored:timer_unhandled:{name}</td>
+    </tr>
+    <tr class="cross terminal">
+      <td><em>any terminal</em></td>
+      <td class="event"><em>anything</em></td>
+      <td class="guard"><span class="dash">—</span></td>
+      <td class="next"><em>unchanged</em></td>
+      <td class="actions">none</td>
+      <td class="reason">ignored:terminal</td>
     </tr>
   </tbody>
 </table>
+
+<h2>Per-state transitions</h2>
+<p class="source">
+  Each block lists every <strong>non-ignored</strong> branch for that state.
+  Branches not listed return <code>ignored:&lt;why&gt;</code> (no state
+  change, no actions). The <em>opt-out</em> column applies only when
+  <code>CallEnded.outcome.business_outcome == "opted_out"</code>; it routes
+  via the same universal opt-out path as the cross-cutting
+  <code>CustomerOptedOut</code> signal.
+</p>
+
+<table>
+  <colgroup>
+    <col style="width:18%">
+    <col style="width:14%">
+    <col style="width:14%">
+    <col style="width:16%">
+    <col style="width:22%">
+    <col style="width:16%">
+  </colgroup>
+  <thead>
+    <tr><th>State</th><th>Event</th><th>Guard</th><th>Next state</th><th>Actions emitted</th><th>reason</th></tr>
+  </thead>
+  <tbody>
+
+    <!-- CREATED ============================================================ -->
+    <tr class="state-head"><td colspan="6">CREATED</td></tr>
+    <tr>
+      <td>CREATED</td>
+      <td class="event"><code>BusinessHoursOpened</code></td>
+      <td class="guard"><span class="dash">—</span></td>
+      <td class="next">CONTACTING_CUSTOMER</td>
+      <td class="actions"><code>PlaceCall(stage=OUTREACH, attempt_number=attempt_count+1)</code> + <code>RecordEvent("case.outreach.started")</code> + <code>patch.increment_attempt_count</code></td>
+      <td class="reason">business_hours_opened</td>
+    </tr>
+
+    <!-- CONTACTING_CUSTOMER ================================================ -->
+    <tr class="state-head"><td colspan="6">CONTACTING_CUSTOMER <span class="faint">(same handler applies to legacy SLOT_PROPOSED and SLOT_PICKED)</span></td></tr>
+    <tr>
+      <td>CONTACTING_CUSTOMER</td>
+      <td class="event"><code>CallEnded(outcome.business_outcome="booked", booked_slot_id=X)</code></td>
+      <td class="guard"><code>X is not None</code></td>
+      <td class="next">CONFIRMING_WITH_DEALER</td>
+      <td class="actions"><code>RequestDealerConfirmation(slot_id=X)</code> + <code>RecordEvent("case.slot.picked")</code> + <code>patch(booked_slot_id=X, booked_slot_display=...)</code></td>
+      <td class="reason">outreach_booked</td>
+    </tr>
+    <tr class="defensive">
+      <td>CONTACTING_CUSTOMER</td>
+      <td class="event"><code>CallEnded(outcome.business_outcome="booked", booked_slot_id=None)</code></td>
+      <td class="guard"><span class="dash">—</span></td>
+      <td class="next"><em>unchanged</em></td>
+      <td class="actions">none</td>
+      <td class="reason">ignored:booked_without_slot_id</td>
+    </tr>
+    <tr>
+      <td>CONTACTING_CUSTOMER</td>
+      <td class="event"><code>CallEnded(outcome.business_outcome="declined")</code></td>
+      <td class="guard"><span class="dash">—</span></td>
+      <td class="next terminal">DECLINED</td>
+      <td class="actions"><code>RecordEvent("case.closed.declined")</code></td>
+      <td class="reason">outreach_declined</td>
+    </tr>
+    <tr>
+      <td>CONTACTING_CUSTOMER</td>
+      <td class="event"><code>CallEnded(outcome.is_decided=False)</code> <span class="muted">(inconclusive)</span></td>
+      <td class="guard"><code>attempt_count &lt; 2</code></td>
+      <td class="next">CONTACTING_CUSTOMER <span class="muted">(retry)</span></td>
+      <td class="actions"><code>PlaceCall(stage=OUTREACH, attempt_number=attempt_count+1)</code> + <code>RecordEvent("case.call.retry")</code> + <code>patch.increment_attempt_count</code></td>
+      <td class="reason">incomplete_retry</td>
+    </tr>
+    <tr>
+      <td>CONTACTING_CUSTOMER</td>
+      <td class="event"><code>CallEnded(outcome.is_decided=False)</code> <span class="muted">(inconclusive)</span></td>
+      <td class="guard"><code>attempt_count == 2</code></td>
+      <td class="next terminal">ABANDONED</td>
+      <td class="actions"><code>RecordEvent("case.closed.abandoned", level=warn)</code></td>
+      <td class="reason">outreach_abandoned</td>
+    </tr>
+    <tr>
+      <td>CONTACTING_CUSTOMER</td>
+      <td class="event"><code>CallEnded(outcome.business_outcome="opted_out")</code></td>
+      <td class="guard"><span class="dash">—</span></td>
+      <td class="next terminal">OPTED_OUT</td>
+      <td class="actions"><span class="muted">universal opt-out path (see cross-cutting rules)</span></td>
+      <td class="reason">opt_out</td>
+    </tr>
+
+    <!-- CONFIRMING_WITH_DEALER ============================================= -->
+    <tr class="state-head"><td colspan="6">CONFIRMING_WITH_DEALER</td></tr>
+    <tr>
+      <td>CONFIRMING_WITH_DEALER</td>
+      <td class="event"><code>DealerConfirmed(slot_id=X)</code></td>
+      <td class="guard"><code>slot.starts_at − now &ge; 24h</code></td>
+      <td class="next">INITIAL_REMINDER_DUE</td>
+      <td class="actions"><code>ScheduleTimer(initial_reminder, fire_at=slot−24h)</code> + <code>ScheduleTimer(final_reminder, fire_at=slot−2h)</code> + <code>RecordEvent("case.booking.confirmed")</code> + <code>patch(booked_slot_id=X, booked_slot_display=...)</code></td>
+      <td class="reason">confirmed_awaiting_initial_reminder</td>
+    </tr>
+    <tr>
+      <td>CONFIRMING_WITH_DEALER</td>
+      <td class="event"><code>DealerConfirmed(slot_id=X)</code></td>
+      <td class="guard"><code>slot.starts_at − now &lt; 24h</code></td>
+      <td class="next">FINAL_REMINDER_DUE</td>
+      <td class="actions"><code>ScheduleTimer(final_reminder, fire_at=slot−2h)</code> + <code>RecordEvent("case.booking.confirmed_no_initial_reminder")</code> + <code>patch(booked_slot_id=X, booked_slot_display=...)</code></td>
+      <td class="reason">confirmed_skip_initial_reminder</td>
+    </tr>
+    <tr class="defensive">
+      <td>CONFIRMING_WITH_DEALER</td>
+      <td class="event"><code>DealerConfirmed(slot_id=X)</code></td>
+      <td class="guard"><code>X ∉ case.offered_slots</code></td>
+      <td class="next"><em>unchanged</em></td>
+      <td class="actions">none</td>
+      <td class="reason">ignored:dealer_confirmed_unknown_slot</td>
+    </tr>
+    <tr>
+      <td>CONFIRMING_WITH_DEALER</td>
+      <td class="event"><code>DealerRejected(slot_id, reason)</code></td>
+      <td class="guard"><span class="dash">—</span></td>
+      <td class="next">RESCHEDULING</td>
+      <td class="actions"><code>RequestDealerSlots</code> + <code>RecordEvent("case.dealer.rejected", level=warn)</code></td>
+      <td class="reason">dealer_rejected</td>
+    </tr>
+
+    <!-- INITIAL_REMINDER_DUE =============================================== -->
+    <tr class="state-head"><td colspan="6">INITIAL_REMINDER_DUE</td></tr>
+    <tr>
+      <td>INITIAL_REMINDER_DUE</td>
+      <td class="event"><code>InitialReminderDue</code> <span class="muted">(TIMER_INITIAL_REMINDER fired)</span></td>
+      <td class="guard"><span class="dash">—</span></td>
+      <td class="next">INITIAL_REMINDER_SENT</td>
+      <td class="actions"><code>PlaceCall(stage=INITIAL_REMINDER, attempt_number=attempt_count+1)</code> + <code>RecordEvent("case.initial_reminder.sending")</code> + <code>patch.increment_attempt_count</code></td>
+      <td class="reason">initial_reminder_due</td>
+    </tr>
+    <tr class="defensive">
+      <td>INITIAL_REMINDER_DUE</td>
+      <td class="event"><code>FinalReminderDue</code> <span class="muted">(TIMER_FINAL_REMINDER fired first)</span></td>
+      <td class="guard"><span class="dash">—</span></td>
+      <td class="next">FINAL_REMINDER_SENT</td>
+      <td class="actions"><code>PlaceCall(stage=FINAL_REMINDER, attempt_number=attempt_count+1)</code> + <code>RecordEvent("case.final_reminder.sending")</code> + <code>patch.increment_attempt_count</code></td>
+      <td class="reason">final_reminder_due</td>
+    </tr>
+
+    <!-- INITIAL_REMINDER_SENT ============================================== -->
+    <tr class="state-head"><td colspan="6">INITIAL_REMINDER_SENT</td></tr>
+    <tr>
+      <td>INITIAL_REMINDER_SENT</td>
+      <td class="event"><code>CallEnded(outcome.business_outcome="confirmed")</code></td>
+      <td class="guard"><span class="dash">—</span></td>
+      <td class="next">INITIAL_REMINDER_SENT <span class="muted">(no-op transition; logged)</span></td>
+      <td class="actions"><code>RecordEvent("case.initial_reminder.confirmed")</code></td>
+      <td class="reason">initial_reminder_confirmed</td>
+    </tr>
+    <tr>
+      <td>INITIAL_REMINDER_SENT</td>
+      <td class="event"><code>CallEnded(outcome.business_outcome="cancelled")</code></td>
+      <td class="guard"><span class="dash">—</span></td>
+      <td class="next terminal">CANCELLED</td>
+      <td class="actions"><code>CancelTimer(final_reminder)</code> + <code>CancelTimer(end_of_business_day)</code> + <code>RecordEvent("case.closed.cancelled")</code></td>
+      <td class="reason">initial_reminder_cancelled</td>
+    </tr>
+    <tr>
+      <td>INITIAL_REMINDER_SENT</td>
+      <td class="event"><code>CallEnded(outcome.business_outcome="rescheduled")</code></td>
+      <td class="guard"><code>reschedule_count &lt; 1</code></td>
+      <td class="next">RESCHEDULING</td>
+      <td class="actions"><code>CancelTimer(final_reminder)</code> + <code>CancelTimer(end_of_business_day)</code> + <code>RequestDealerSlots</code> + <code>RecordEvent("case.initial_reminder.rescheduling")</code> + <code>patch.increment_reschedule_count</code></td>
+      <td class="reason">initial_reminder_rescheduling</td>
+    </tr>
+    <tr>
+      <td>INITIAL_REMINDER_SENT</td>
+      <td class="event"><code>CallEnded(outcome.business_outcome="rescheduled")</code></td>
+      <td class="guard"><code>reschedule_count == 1</code></td>
+      <td class="next terminal">RESCHEDULE_FAILED</td>
+      <td class="actions"><code>CancelTimer(final_reminder)</code> + <code>CancelTimer(end_of_business_day)</code> + <code>RecordEvent("case.closed.reschedule_failed", level=warn)</code></td>
+      <td class="reason">reschedule_one_shot_exhausted</td>
+    </tr>
+    <tr>
+      <td>INITIAL_REMINDER_SENT</td>
+      <td class="event"><code>CallEnded(outcome.business_outcome="opted_out")</code></td>
+      <td class="guard"><span class="dash">—</span></td>
+      <td class="next terminal">OPTED_OUT</td>
+      <td class="actions"><span class="muted">universal opt-out path</span></td>
+      <td class="reason">opt_out</td>
+    </tr>
+    <tr>
+      <td>INITIAL_REMINDER_SENT</td>
+      <td class="event"><code>CallEnded(outcome.is_decided=False)</code> <span class="muted">(inconclusive)</span></td>
+      <td class="guard"><code>attempt_count &lt; 2</code></td>
+      <td class="next">INITIAL_REMINDER_SENT <span class="muted">(retry)</span></td>
+      <td class="actions"><code>PlaceCall(stage=INITIAL_REMINDER, attempt_number=attempt_count+1)</code> + <code>RecordEvent("case.call.retry")</code> + <code>patch.increment_attempt_count</code></td>
+      <td class="reason">incomplete_retry</td>
+    </tr>
+    <tr>
+      <td>INITIAL_REMINDER_SENT</td>
+      <td class="event"><code>CallEnded(outcome.is_decided=False)</code> <span class="muted">(inconclusive)</span></td>
+      <td class="guard"><code>attempt_count == 2</code></td>
+      <td class="next">INITIAL_REMINDER_SENT <span class="muted">(no-op; final-reminder timer is still armed)</span></td>
+      <td class="actions">none</td>
+      <td class="reason">ignored:initial_reminder_incomplete_awaiting_final</td>
+    </tr>
+    <tr>
+      <td>INITIAL_REMINDER_SENT</td>
+      <td class="event"><code>FinalReminderDue</code> <span class="muted">(day-of timer fires while we're still here)</span></td>
+      <td class="guard"><span class="dash">—</span></td>
+      <td class="next">FINAL_REMINDER_SENT</td>
+      <td class="actions"><code>PlaceCall(stage=FINAL_REMINDER, attempt_number=attempt_count+1)</code> + <code>RecordEvent("case.final_reminder.sending")</code> + <code>patch.increment_attempt_count</code></td>
+      <td class="reason">final_reminder_due</td>
+    </tr>
+
+    <!-- RESCHEDULING ======================================================= -->
+    <tr class="state-head"><td colspan="6">RESCHEDULING</td></tr>
+    <tr>
+      <td>RESCHEDULING</td>
+      <td class="event"><code>DealerSlotsListed(slots=[...])</code></td>
+      <td class="guard"><span class="dash">—</span></td>
+      <td class="next">CONTACTING_CUSTOMER</td>
+      <td class="actions"><code>PlaceCall(stage=OUTREACH, attempt_number=attempt_count+1)</code> + <code>RecordEvent("case.reschedule.slots_listed")</code> + <code>patch.increment_attempt_count</code></td>
+      <td class="reason">rescheduling_slots_received</td>
+    </tr>
+    <tr>
+      <td>RESCHEDULING</td>
+      <td class="event"><code>CallEnded(outcome.business_outcome="booked", booked_slot_id=X)</code></td>
+      <td class="guard"><code>X is not None</code></td>
+      <td class="next">CONFIRMING_WITH_DEALER</td>
+      <td class="actions"><code>RequestDealerConfirmation(slot_id=X)</code> + <code>RecordEvent("case.reschedule.picked")</code> + <code>patch(booked_slot_id=X, booked_slot_display=...)</code></td>
+      <td class="reason">rescheduling_booked</td>
+    </tr>
+    <tr class="defensive">
+      <td>RESCHEDULING</td>
+      <td class="event"><code>CallEnded(outcome.business_outcome="booked", booked_slot_id=None)</code></td>
+      <td class="guard"><span class="dash">—</span></td>
+      <td class="next"><em>unchanged</em></td>
+      <td class="actions">none</td>
+      <td class="reason">ignored:rescheduling_booked_without_slot_id</td>
+    </tr>
+    <tr>
+      <td>RESCHEDULING</td>
+      <td class="event"><code>CallEnded(outcome.business_outcome="cancelled")</code></td>
+      <td class="guard"><span class="dash">—</span></td>
+      <td class="next terminal">CANCELLED</td>
+      <td class="actions"><code>RecordEvent("case.closed.cancelled")</code></td>
+      <td class="reason">rescheduling_cancelled</td>
+    </tr>
+    <tr>
+      <td>RESCHEDULING</td>
+      <td class="event"><code>CallEnded(outcome.business_outcome="opted_out")</code></td>
+      <td class="guard"><span class="dash">—</span></td>
+      <td class="next terminal">OPTED_OUT</td>
+      <td class="actions"><span class="muted">universal opt-out path</span></td>
+      <td class="reason">opt_out</td>
+    </tr>
+    <tr>
+      <td>RESCHEDULING</td>
+      <td class="event"><code>CallEnded(outcome.is_decided=False)</code> <span class="muted">(inconclusive)</span></td>
+      <td class="guard"><code>attempt_count &lt; 2</code></td>
+      <td class="next">RESCHEDULING <span class="muted">(retry)</span></td>
+      <td class="actions"><code>PlaceCall(stage=OUTREACH, attempt_number=attempt_count+1)</code> + <code>RecordEvent("case.call.retry")</code> + <code>patch.increment_attempt_count</code></td>
+      <td class="reason">incomplete_retry</td>
+    </tr>
+    <tr>
+      <td>RESCHEDULING</td>
+      <td class="event"><code>CallEnded(outcome.is_decided=False)</code> <span class="muted">(inconclusive)</span></td>
+      <td class="guard"><code>attempt_count == 2</code></td>
+      <td class="next terminal">ABANDONED</td>
+      <td class="actions"><code>RecordEvent("case.closed.abandoned", level=warn)</code></td>
+      <td class="reason">outreach_abandoned</td>
+    </tr>
+
+    <!-- FINAL_REMINDER_DUE ================================================= -->
+    <tr class="state-head"><td colspan="6">FINAL_REMINDER_DUE</td></tr>
+    <tr>
+      <td>FINAL_REMINDER_DUE</td>
+      <td class="event"><code>FinalReminderDue</code> <span class="muted">(TIMER_FINAL_REMINDER fired)</span></td>
+      <td class="guard"><span class="dash">—</span></td>
+      <td class="next">FINAL_REMINDER_SENT</td>
+      <td class="actions"><code>PlaceCall(stage=FINAL_REMINDER, attempt_number=attempt_count+1)</code> + <code>RecordEvent("case.final_reminder.sending")</code> + <code>patch.increment_attempt_count</code></td>
+      <td class="reason">final_reminder_due</td>
+    </tr>
+    <tr class="defensive">
+      <td>FINAL_REMINDER_DUE</td>
+      <td class="event"><code>VehicleEnteredDealer</code> <span class="muted">(early arrival)</span></td>
+      <td class="guard"><span class="dash">—</span></td>
+      <td class="next">SHOWED</td>
+      <td class="actions"><code>CancelTimer(final_reminder)</code> + <code>CancelTimer(end_of_business_day)</code> + <code>RecordEvent("case.geofence.entered")</code></td>
+      <td class="reason">vehicle_arrived</td>
+    </tr>
+
+    <!-- FINAL_REMINDER_SENT ================================================ -->
+    <tr class="state-head"><td colspan="6">FINAL_REMINDER_SENT</td></tr>
+    <tr>
+      <td>FINAL_REMINDER_SENT</td>
+      <td class="event"><code>CallEnded(outcome.business_outcome="confirmed")</code></td>
+      <td class="guard"><span class="dash">—</span></td>
+      <td class="next">FINAL_REMINDER_SENT <span class="muted">(no-op; logged)</span></td>
+      <td class="actions"><code>RecordEvent("case.final_reminder.confirmed")</code></td>
+      <td class="reason">final_reminder_confirmed</td>
+    </tr>
+    <tr>
+      <td>FINAL_REMINDER_SENT</td>
+      <td class="event"><code>CallEnded(outcome.business_outcome="cancelled")</code></td>
+      <td class="guard"><span class="dash">—</span></td>
+      <td class="next terminal">CANCELLED</td>
+      <td class="actions"><code>CancelTimer(final_reminder)</code> + <code>CancelTimer(end_of_business_day)</code> + <code>RecordEvent("case.closed.cancelled")</code></td>
+      <td class="reason">final_reminder_cancelled</td>
+    </tr>
+    <tr>
+      <td>FINAL_REMINDER_SENT</td>
+      <td class="event"><code>CallEnded(outcome.business_outcome="rescheduled")</code></td>
+      <td class="guard"><code>reschedule_count &lt; 1</code></td>
+      <td class="next">RESCHEDULING</td>
+      <td class="actions"><code>CancelTimer(final_reminder)</code> + <code>CancelTimer(end_of_business_day)</code> + <code>RequestDealerSlots</code> + <code>RecordEvent("case.final_reminder.rescheduling")</code> + <code>patch.increment_reschedule_count</code></td>
+      <td class="reason">final_reminder_rescheduling</td>
+    </tr>
+    <tr>
+      <td>FINAL_REMINDER_SENT</td>
+      <td class="event"><code>CallEnded(outcome.business_outcome="rescheduled")</code></td>
+      <td class="guard"><code>reschedule_count == 1</code></td>
+      <td class="next terminal">RESCHEDULE_FAILED</td>
+      <td class="actions"><code>CancelTimer(final_reminder)</code> + <code>CancelTimer(end_of_business_day)</code> + <code>RecordEvent("case.closed.reschedule_failed", level=warn)</code></td>
+      <td class="reason">reschedule_one_shot_exhausted</td>
+    </tr>
+    <tr>
+      <td>FINAL_REMINDER_SENT</td>
+      <td class="event"><code>CallEnded(outcome.business_outcome="opted_out")</code></td>
+      <td class="guard"><span class="dash">—</span></td>
+      <td class="next terminal">OPTED_OUT</td>
+      <td class="actions"><span class="muted">universal opt-out path</span></td>
+      <td class="reason">opt_out</td>
+    </tr>
+    <tr>
+      <td>FINAL_REMINDER_SENT</td>
+      <td class="event"><code>CallEnded(outcome.is_decided=False)</code> <span class="muted">(inconclusive)</span></td>
+      <td class="guard"><code>attempt_count &lt; 2</code></td>
+      <td class="next">FINAL_REMINDER_SENT <span class="muted">(retry)</span></td>
+      <td class="actions"><code>PlaceCall(stage=FINAL_REMINDER, attempt_number=attempt_count+1)</code> + <code>RecordEvent("case.call.retry")</code> + <code>patch.increment_attempt_count</code></td>
+      <td class="reason">incomplete_retry</td>
+    </tr>
+    <tr>
+      <td>FINAL_REMINDER_SENT</td>
+      <td class="event"><code>CallEnded(outcome.is_decided=False)</code> <span class="muted">(inconclusive)</span></td>
+      <td class="guard"><code>attempt_count == 2</code></td>
+      <td class="next">FINAL_REMINDER_SENT <span class="muted">(no-op; geofence/EoD will decide)</span></td>
+      <td class="actions">none</td>
+      <td class="reason">ignored:final_reminder_incomplete_geofence_will_decide</td>
+    </tr>
+    <tr>
+      <td>FINAL_REMINDER_SENT</td>
+      <td class="event"><code>VehicleEnteredDealer</code></td>
+      <td class="guard"><span class="dash">—</span></td>
+      <td class="next">SHOWED</td>
+      <td class="actions"><code>CancelTimer(final_reminder)</code> + <code>CancelTimer(end_of_business_day)</code> + <code>RecordEvent("case.geofence.entered")</code></td>
+      <td class="reason">vehicle_arrived</td>
+    </tr>
+    <tr>
+      <td>FINAL_REMINDER_SENT</td>
+      <td class="event"><code>EndOfBusinessDayReached</code></td>
+      <td class="guard"><span class="dash">—</span></td>
+      <td class="next terminal">NO_SHOW</td>
+      <td class="actions"><code>CancelTimer(end_of_business_day)</code> + <code>RecordEvent("case.closed.no_show", level=warn)</code></td>
+      <td class="reason">no_show_at_eod</td>
+    </tr>
+
+    <!-- SHOWED ============================================================= -->
+    <tr class="state-head"><td colspan="6">SHOWED <span class="faint">(same feedback handlers also apply to legacy AWAITING_FEEDBACK)</span></td></tr>
+    <tr>
+      <td>SHOWED</td>
+      <td class="event"><code>VehicleExitedDealer</code></td>
+      <td class="guard"><span class="dash">—</span></td>
+      <td class="next terminal">COMPLETED</td>
+      <td class="actions"><code>CancelTimer(end_of_business_day)</code> + <code>RecordEvent("case.geofence.exited")</code> + <code>RecordEvent("case.closed.service_event_complete")</code></td>
+      <td class="reason">service_event_complete</td>
+    </tr>
+    <tr class="defensive">
+      <td>SHOWED</td>
+      <td class="event"><code>CallEnded(outcome.business_outcome="feedback")</code></td>
+      <td class="guard"><span class="dash">—</span></td>
+      <td class="next terminal">COMPLETED</td>
+      <td class="actions"><code>RecordEvent("case.closed.completed", detail="feedback captured")</code></td>
+      <td class="reason">feedback_captured</td>
+    </tr>
+    <tr class="defensive">
+      <td>SHOWED</td>
+      <td class="event"><code>CallEnded(outcome.is_decided=False)</code> <span class="muted">(inconclusive)</span></td>
+      <td class="guard"><code>attempt_count &lt; 2</code></td>
+      <td class="next">SHOWED <span class="muted">(retry)</span></td>
+      <td class="actions"><code>PlaceCall(stage=FEEDBACK, attempt_number=attempt_count+1)</code> + <code>RecordEvent("case.call.retry")</code> + <code>patch.increment_attempt_count</code></td>
+      <td class="reason">incomplete_retry</td>
+    </tr>
+    <tr class="defensive">
+      <td>SHOWED</td>
+      <td class="event"><code>CallEnded(outcome.is_decided=False)</code> <span class="muted">(inconclusive)</span></td>
+      <td class="guard"><code>attempt_count == 2</code></td>
+      <td class="next terminal">COMPLETED</td>
+      <td class="actions"><code>RecordEvent("case.closed.completed", detail="feedback skipped; service event complete")</code></td>
+      <td class="reason">feedback_silence_completes</td>
+    </tr>
+    <tr>
+      <td>SHOWED</td>
+      <td class="event"><code>CallEnded(outcome.business_outcome="opted_out")</code></td>
+      <td class="guard"><span class="dash">—</span></td>
+      <td class="next terminal">OPTED_OUT</td>
+      <td class="actions"><span class="muted">universal opt-out path</span></td>
+      <td class="reason">opt_out</td>
+    </tr>
+
+  </tbody>
+</table>
+
+<div class="note">
+  <h3>Why some SHOWED rows are marked "defensive"</h3>
+  The reducer routes <code>SHOWED</code> calls through the FEEDBACK call
+  stage (<code>_stage_for_state(SHOWED) == FEEDBACK</code>) and accepts
+  <code>feedback</code> / <code>inconclusive</code> CallEnded outcomes. But
+  no v2 reducer branch ever emits <code>PlaceCall(stage=FEEDBACK)</code>, so
+  those branches only fire if something <em>outside</em> the v2 flow
+  (legacy code, test setup, or operator action) places a feedback call. The
+  happy path from <code>SHOWED</code> is <code>VehicleExitedDealer</code>
+  going straight to <code>COMPLETED</code>.
+</div>
 
 <h2>Terminal states</h2>
 <table>
@@ -300,52 +660,74 @@
     <col style="width:76%">
   </colgroup>
   <thead>
-    <tr><th>State</th><th>Why this is a dead end</th></tr>
+    <tr><th>State</th><th>Reached via</th></tr>
   </thead>
   <tbody>
-    <tr class="terminal"><td class="state">SERVICE_EVENT_COMPLETE</td><td>Happy path. Vehicle entered (geofence-in from <code>FINAL_REMINDER_SENT</code>) and then exited (geofence-out from <code>SHOWED</code>).</td></tr>
-    <tr class="terminal"><td class="state">DECLINED</td><td>Customer said no during outreach. We do not re-contact about the same issue.</td></tr>
-    <tr class="terminal"><td class="state">CANCELLED</td><td>Customer cancelled at either reminder, or during rescheduling.</td></tr>
-    <tr class="terminal"><td class="state">ABANDONED</td><td>Outreach or rescheduling session ended <em>inconclusive</em>. Graceful timeout, no nag.</td></tr>
-    <tr class="terminal"><td class="state">OPTED_OUT</td><td>Customer sent STOP (or any other opt-out path). Closes any non-terminal case immediately.</td></tr>
-    <tr class="terminal legacy"><td class="state">BOOKED</td><td><em>Legacy v1 only.</em> The v2 reducer never reaches it; <code>booked</code> outcomes route through <code>CONFIRMING_WITH_DEALER</code>.</td></tr>
+    <tr class="terminal"><td><code>DECLINED</code></td><td><code>CONTACTING_CUSTOMER + CallEnded(declined)</code>.</td></tr>
+    <tr class="terminal"><td><code>CANCELLED</code></td><td><code>INITIAL_REMINDER_SENT</code>, <code>FINAL_REMINDER_SENT</code>, or <code>RESCHEDULING + CallEnded(cancelled)</code>.</td></tr>
+    <tr class="terminal"><td><code>ABANDONED</code></td><td>Inconclusive call at <code>attempt_count == 2</code> in <code>CONTACTING_CUSTOMER</code> or <code>RESCHEDULING</code>.</td></tr>
+    <tr class="terminal"><td><code>NO_SHOW</code></td><td><code>FINAL_REMINDER_SENT + EndOfBusinessDayReached</code> (no geofence-in by close of business).</td></tr>
+    <tr class="terminal"><td><code>RESCHEDULE_FAILED</code></td><td>Customer requested a second reschedule at either reminder (<code>reschedule_count == 1</code> when <code>CallEnded(rescheduled)</code> arrives).</td></tr>
+    <tr class="terminal"><td><code>OPTED_OUT</code></td><td>Cross-cutting <code>CustomerOptedOut</code>, or <code>CallEnded(opted_out)</code> from any non-terminal state.</td></tr>
+    <tr class="terminal"><td><code>COMPLETED</code></td><td>Happy path: <code>SHOWED + VehicleExitedDealer</code>. The audit trail gets both <code>case.geofence.exited</code> and <code>case.closed.service_event_complete</code>. Also reachable via the defensive feedback-call branches above.</td></tr>
+    <tr class="terminal"><td><code>BOOKED</code></td><td><em>Legacy v1 enum value.</em> No v2 reducer branch ever lands here.</td></tr>
   </tbody>
 </table>
 
-<h2>States removed in this revision</h2>
+<h2>States in the enum the v2 reducer never lands in</h2>
+<ul class="notes">
+  <li><code>SLOT_PROPOSED</code>, <code>SLOT_PICKED</code> — legacy v1
+    enum values. <code>_on_decided_outcome</code> and
+    <code>_stage_for_state</code> still handle them identically to
+    <code>CONTACTING_CUSTOMER</code> (so migrated v1 cases keep working),
+    but no v2 reducer branch transitions <em>into</em> them.</li>
+  <li><code>AWAITING_FEEDBACK</code> — legacy. The feedback handlers in
+    <code>_on_decided_outcome</code> and <code>_on_incomplete_outcome</code>
+    accept it alongside <code>SHOWED</code>; no v2 reducer branch
+    transitions <em>into</em> it.</li>
+  <li><code>BOOKED</code> — legacy terminal. Replaced by the
+    <code>CONFIRMING_WITH_DEALER → INITIAL_REMINDER_DUE / FINAL_REMINDER_DUE</code>
+    path. No v2 reducer branch lands here.</li>
+</ul>
+
+<h2>Signals the reducer accepts but only consumes at specific states</h2>
 <table>
   <colgroup>
     <col style="width:24%">
-    <col style="width:76%">
+    <col style="width:36%">
+    <col style="width:40%">
   </colgroup>
   <thead>
-    <tr><th>Former state</th><th>What replaced it</th></tr>
+    <tr><th>Signal</th><th>States where it transitions</th><th>Everywhere else</th></tr>
   </thead>
   <tbody>
-    <tr><td class="state">NO_SHOW</td><td>Direct transition <code>FINAL_REMINDER_SENT</code> + <code>EndOfBusinessDayReached</code> → <code>RESCHEDULING</code>. No-show triggers a reschedule, not a terminal dead end.</td></tr>
-    <tr><td class="state">AWAITING_FEEDBACK</td><td>Removed. <code>SHOWED</code> + geofence-out goes straight to <code>SERVICE_EVENT_COMPLETE</code>. Feedback collection is not modeled in the v2 state machine.</td></tr>
-    <tr><td class="state">COMPLETED</td><td>Renamed to <code>SERVICE_EVENT_COMPLETE</code> to be unambiguous about what completed.</td></tr>
-    <tr><td class="state">RESCHEDULE_FAILED</td><td>Removed — no reschedule budget in the dictated model. (See open questions below.)</td></tr>
-    <tr><td class="state">SLOT_PROPOSED, SLOT_PICKED</td><td>Still legacy v1 enum values; never reached by the v2 reducer.</td></tr>
+    <tr><td><code>BusinessHoursOpened</code></td><td><code>CREATED</code> only</td><td><code>ignored:business_hours_irrelevant_at_{state}</code></td></tr>
+    <tr><td><code>EndOfBusinessDayReached</code></td><td><code>FINAL_REMINDER_SENT</code> only</td><td><code>ignored:eod_irrelevant_at_{state}</code></td></tr>
+    <tr><td><code>DealerConfirmed</code></td><td><code>CONFIRMING_WITH_DEALER</code> only</td><td><code>ignored:dealer_confirmed_irrelevant_at_{state}</code></td></tr>
+    <tr><td><code>DealerRejected</code></td><td><code>CONFIRMING_WITH_DEALER</code> only</td><td><code>ignored:dealer_rejected_irrelevant_at_{state}</code></td></tr>
+    <tr><td><code>DealerSlotsListed</code></td><td><code>RESCHEDULING</code> only</td><td><code>ignored:slots_listed_irrelevant_at_{state}</code></td></tr>
+    <tr><td><code>InitialReminderDue</code></td><td><code>INITIAL_REMINDER_DUE</code> only</td><td><code>ignored:initial_reminder_due_irrelevant_at_{state}</code></td></tr>
+    <tr><td><code>FinalReminderDue</code></td><td><code>FINAL_REMINDER_DUE</code>, <code>INITIAL_REMINDER_DUE</code>, <code>INITIAL_REMINDER_SENT</code></td><td><code>ignored:final_reminder_due_irrelevant_at_{state}</code></td></tr>
+    <tr><td><code>VehicleEnteredDealer</code></td><td><code>FINAL_REMINDER_SENT</code>, <code>FINAL_REMINDER_DUE</code></td><td><code>ignored:geofence_in_irrelevant_at_{state}</code></td></tr>
+    <tr><td><code>VehicleExitedDealer</code></td><td><code>SHOWED</code> only</td><td><code>ignored:geofence_out_irrelevant_at_{state}</code></td></tr>
+    <tr><td><code>CallEnded</code></td><td>Any state with a non-<code>None</code> <code>_stage_for_state</code> mapping (every active state except <code>CONFIRMING_WITH_DEALER</code>, <code>INITIAL_REMINDER_DUE</code>, <code>FINAL_REMINDER_DUE</code>)</td><td><code>ignored:call_ended_no_active_stage_at_{state}</code></td></tr>
   </tbody>
 </table>
 
-<div class="question">
-  <h3>Open questions you didn't address — flagging, not assuming</h3>
-  <ol>
-    <li><strong>Reschedule budget.</strong> The prior model capped reschedules at 1 (then routed to <code>RESCHEDULE_FAILED</code>). You didn't mention it. Drop the cap entirely (infinite reschedules), or keep it and pick a new terminal name?</li>
-    <li><strong>Early geofence-in.</strong> What if the vehicle pulls into the dealer while we're still in <code>BOOKING_COMPLETE</code>, <code>INITIAL_REMINDER_DUE</code>, or <code>INITIAL_REMINDER_SENT</code> — i.e., before the final reminder fires? Currently only <code>FINAL_REMINDER_SENT</code> + <code>VehicleEnteredDealer</code> → <code>SHOWED</code> is in the table.</li>
-    <li><strong>Same-day booking.</strong> If the customer books at 10 AM for 2 PM today, the 24-hour-prior timer's fire time is yesterday (already in the past). Skip arming it entirely, or arm it and let the timer service drop past fires? Either way, the day-of timer fires almost immediately.</li>
-    <li><strong>Opt-out from <code>BOOKING_COMPLETE</code>.</strong> Covered by the cross-cutting rule above (sends to <code>OPTED_OUT</code>). Confirming you want it to apply here too.</li>
-    <li><strong>Cancel during outreach / rescheduling.</strong> Today, an outreach <code>CallEnded(outcome=cancelled)</code> isn't listed because customers don't typically cancel before booking. Confirm we don't need a separate row.</li>
-    <li><strong><code>MessageDispatched</code> event.</strong> This event doesn't exist in the code yet — it's a placeholder for whatever the send queue emits back to the reducer when an SMS actually goes out. Name + payload to be decided when we wire the send queue.</li>
-  </ol>
-</div>
-
 <ul class="notes">
-  <li><strong>Timer arming</strong> happens as an action emitted when entering <code>BOOKING_COMPLETE</code>. Future-day booking arms both timers (24h-before + day-of). Same-day booking arms only the day-of timer.</li>
-  <li><strong>Send queue</strong> owns business-hours gating. When a <code>*_DUE</code> state's <code>PlaceCall</code> action lands in the queue outside business hours, the queue holds it until open.</li>
-  <li><strong>Reducer-internal integrity checks</strong> (e.g., "is this slot_id actually in <code>case.offered_slots</code>?") still exist as defensive no-ops but do not branch state transitions, so they don't appear in this table.</li>
+  <li>Every <code>CaseDecision</code> carries a <code>reason</code>
+    string. No-op decisions use <code>reason="ignored:&lt;why&gt;"</code>
+    so the driver can log them at debug level without losing the audit
+    trail.</li>
+  <li>The reducer is pure: it returns actions; the driver applies them.
+    Actions are: <code>PlaceCall</code>, <code>RequestDealerSlots</code>,
+    <code>RequestDealerConfirmation</code>, <code>ScheduleTimer</code>,
+    <code>CancelTimer</code>, <code>RecordEvent</code>.</li>
+  <li>Of those, only <code>PlaceCall</code> ever causes an LLM call
+    downstream (via the channel's <code>CallSession.start()</code>).
+    Every other action is bookkeeping / I/O against the dealer port or
+    timer wheel. Sliders (geofence, EoD, business hours) never produce
+    <code>PlaceCall</code>.</li>
 </ul>
 
 </body>
