@@ -15,8 +15,6 @@ from fastapi import HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from guidepoint.case import (
-    BusinessHoursClosed,
-    BusinessHoursOpened,
     CaseDriver,
     CaseError,
     CaseId,
@@ -195,13 +193,20 @@ async def put_business_hours(
     case_driver: CaseDriver,
     clock: Clock,
 ) -> WorldStateResponse:
+    """Flip the world business-hours boolean.
+
+    No signal is fired into the case driver — the state machine has
+    no opinion on hours. The outbound queue worker polls
+    :meth:`SimulatorWorldState.hours_open` directly and drains queued
+    messages as soon as this boolean flips ``True``.
+
+    The unused ``case_driver`` + ``clock`` parameters are kept so the
+    route-builder signature is stable across other handlers and so a
+    future need (e.g. an audit "hours-flipped" CaseEvent) is a one-line
+    change rather than a route-wiring shuffle.
+    """
+    del case_driver, clock  # kept for signature stability; see docstring
     world.set_business_hours(open=body.open)
-    signal = (
-        BusinessHoursOpened(timestamp=clock.now(), source="operator")
-        if body.open
-        else BusinessHoursClosed(timestamp=clock.now(), source="operator")
-    )
-    await case_driver.on_signal(signal)
     geofence: SimulatorGeofencePort = request.app.state.geofence_port
     vin = getattr(request.app.state, "active_vehicle_vin", "")
     return get_world_state(world=world, geofence_port=geofence, vehicle_vin=vin)

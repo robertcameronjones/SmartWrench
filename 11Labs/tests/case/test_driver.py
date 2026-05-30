@@ -498,10 +498,14 @@ async def test_queue_overflow_drops_signals_without_raising(
             dealer=sample_dealer(),
             vehicle=sample_vehicle(),
         )
-        # Let the loop pick up BusinessHoursOpened and start a call.
+        # Let the loop pick up the CaseCreated signal that fire() emits
+        # and start the outreach call.
         await asyncio.wait_for(slow.started.wait(), timeout=1.0)
-        # Now flood many BusinessHoursOpened signals — the case queue
-        # caps at 2, the rest should be dropped silently.
+        # Flood the per-case queue with no-op world signals; the queue
+        # caps at 2, the rest should be dropped silently. The reducer
+        # ignores BusinessHoursOpened (it's the queue worker that owns
+        # the hours gate now), but we use it here purely to exercise
+        # the per-case queue's backpressure.
         for _ in range(20):
             await driver.on_signal(BusinessHoursOpened(timestamp=NOW))
         depths = driver.queue_depths()

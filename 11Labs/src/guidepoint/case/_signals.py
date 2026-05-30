@@ -228,12 +228,53 @@ class CustomerOptedIn(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Lifecycle signals (case-targeted, fired by the driver itself)
+# ---------------------------------------------------------------------------
+
+
+class CaseCreated(BaseModel):
+    """The driver just created a new case and is ready to start outreach.
+
+    Emitted exactly once per case, immediately after the case row is
+    persisted, from :meth:`CaseDriver.fire`. The reducer consumes this
+    in the ``CREATED`` state and transitions to ``CONTACTING_CUSTOMER``
+    while emitting the initial ``PlaceCall`` action.
+
+    This is a **lifecycle** event, not a world event — it doesn't say
+    anything about wall-clock hours. The send-side business-hours gate
+    lives entirely in the outbound queue worker, which holds messages
+    until the simulator/dealer's hours boolean flips open. The
+    state-machine fires sends whenever its model says to and lets the
+    queue decide when they actually leave.
+    """
+
+    model_config = _frozen_strict()
+
+    signal_type: Literal["case_created"] = "case_created"
+    timestamp: UtcDatetime
+    source: EventSource = "system"
+    case_id: CaseId
+
+
+# ---------------------------------------------------------------------------
 # World-gate signals (driver fans out to every awaiting case)
+#
+# ``BusinessHoursOpened`` and ``BusinessHoursClosed`` are kept in the
+# signal vocabulary for forward compatibility (channel adapters or
+# external consumers may want to observe hours transitions) but the
+# state-machine reducer treats them as no-ops. The outbound queue
+# worker — not the reducer — is the single owner of the hours-gating
+# policy.
 # ---------------------------------------------------------------------------
 
 
 class BusinessHoursOpened(BaseModel):
-    """Operator hours opened. Cases in ``CREATED`` can begin outreach."""
+    """Operator hours just opened.
+
+    No-op for the case reducer; the outbound queue worker reads the
+    business-hours boolean directly. Kept in the vocabulary so other
+    listeners can react if they want to.
+    """
 
     model_config = _frozen_strict()
 
@@ -243,7 +284,10 @@ class BusinessHoursOpened(BaseModel):
 
 
 class BusinessHoursClosed(BaseModel):
-    """Operator hours closed. Outreach pauses until next open."""
+    """Operator hours just closed.
+
+    No-op for the case reducer; see :class:`BusinessHoursOpened`.
+    """
 
     model_config = _frozen_strict()
 
@@ -270,6 +314,7 @@ class EndOfBusinessDayReached(BaseModel):
 
 CaseSignal = Annotated[
     CallEnded
+    | CaseCreated
     | DealerSlotsListed
     | DealerConfirmed
     | DealerRejected
@@ -301,6 +346,7 @@ concrete class on deserialization.
 
 _CASE_TARGETED_TYPES: tuple[type[BaseModel], ...] = (
     CallEnded,
+    CaseCreated,
     DealerSlotsListed,
     DealerConfirmed,
     DealerRejected,
@@ -350,6 +396,7 @@ __all__ = [
     "BusinessHoursClosed",
     "BusinessHoursOpened",
     "CallEnded",
+    "CaseCreated",
     "CaseSignal",
     "CustomerOptedIn",
     "CustomerOptedOut",

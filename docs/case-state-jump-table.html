@@ -210,11 +210,11 @@
     </tr>
     <tr class="cross">
       <td><em>any non-terminal</em></td>
-      <td class="event"><code>BusinessHoursClosed</code></td>
+      <td class="event"><code>BusinessHoursOpened</code> or <code>BusinessHoursClosed</code></td>
       <td class="guard"><span class="dash">—</span></td>
       <td class="next"><em>unchanged</em></td>
-      <td class="actions">none</td>
-      <td class="reason">ignored:hours_closed_no_action_at_case_level</td>
+      <td class="actions">none <span class="muted">(the outbound queue worker owns the business-hours gate; the state machine has no opinion)</span></td>
+      <td class="reason">ignored:hours_handled_by_outbound_queue</td>
     </tr>
     <tr class="cross">
       <td><em>any non-terminal</em></td>
@@ -263,11 +263,11 @@
     <tr class="state-head"><td colspan="6">CREATED</td></tr>
     <tr>
       <td>CREATED</td>
-      <td class="event"><code>BusinessHoursOpened</code></td>
+      <td class="event"><code>CaseCreated</code> <span class="muted">(emitted by <code>CaseDriver.fire()</code> right after the case row is persisted)</span></td>
       <td class="guard"><span class="dash">—</span></td>
       <td class="next">CONTACTING_CUSTOMER</td>
       <td class="actions"><code>PlaceCall(stage=OUTREACH, attempt_number=attempt_count+1)</code> + <code>RecordEvent("case.outreach.started")</code> + <code>patch.increment_attempt_count</code></td>
-      <td class="reason">business_hours_opened</td>
+      <td class="reason">case_created</td>
     </tr>
 
     <!-- CONTACTING_CUSTOMER ================================================ -->
@@ -701,7 +701,8 @@
     <tr><th>Signal</th><th>States where it transitions</th><th>Everywhere else</th></tr>
   </thead>
   <tbody>
-    <tr><td><code>BusinessHoursOpened</code></td><td><code>CREATED</code> only</td><td><code>ignored:business_hours_irrelevant_at_{state}</code></td></tr>
+    <tr><td><code>CaseCreated</code></td><td><code>CREATED</code> only</td><td><code>ignored:case_created_irrelevant_at_{state}</code></td></tr>
+    <tr><td><code>BusinessHoursOpened</code> / <code>BusinessHoursClosed</code></td><td><em>never</em> — reducer always returns <code>ignored:hours_handled_by_outbound_queue</code></td><td>same</td></tr>
     <tr><td><code>EndOfBusinessDayReached</code></td><td><code>FINAL_REMINDER_SENT</code> only</td><td><code>ignored:eod_irrelevant_at_{state}</code></td></tr>
     <tr><td><code>DealerConfirmed</code></td><td><code>CONFIRMING_WITH_DEALER</code> only</td><td><code>ignored:dealer_confirmed_irrelevant_at_{state}</code></td></tr>
     <tr><td><code>DealerRejected</code></td><td><code>CONFIRMING_WITH_DEALER</code> only</td><td><code>ignored:dealer_rejected_irrelevant_at_{state}</code></td></tr>

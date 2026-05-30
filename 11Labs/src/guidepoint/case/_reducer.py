@@ -52,6 +52,7 @@ from guidepoint.case._signals import (
     BusinessHoursClosed,
     BusinessHoursOpened,
     CallEnded,
+    CaseCreated,
     CaseSignal,
     CustomerOptedIn,
     CustomerOptedOut,
@@ -285,15 +286,25 @@ def decide_next_case_state(
     if isinstance(signal, CustomerOptedIn):
         return _ignored(case, "opt_in_does_not_revive_case")
 
-    # ---- World gates: business hours + end-of-day ------------------------
+    # ---- Lifecycle ------------------------------------------------------
+
+    if isinstance(signal, CaseCreated):
+        return _on_case_created(case)
+
+    # ---- World gates: business hours + end-of-day -----------------------
+    #
+    # The state-machine has *no opinion* on hours. The outbound queue
+    # worker is the single owner of the hours-gating policy: it reads
+    # the world boolean directly and holds messages when closed. The
+    # reducer therefore swallows hours-opened/closed signals — they
+    # exist in the signal union for other listeners but never drive a
+    # case transition.
 
     if isinstance(signal, BusinessHoursOpened):
-        return _on_business_hours_opened(case)
+        return _ignored(case, "hours_handled_by_outbound_queue")
 
     if isinstance(signal, BusinessHoursClosed):
-        # Cases mid-call keep going; CallManager has its own end-of-shift
-        # discipline. The reducer doesn't pre-empt active conversations.
-        return _ignored(case, "hours_closed_no_action_at_case_level")
+        return _ignored(case, "hours_handled_by_outbound_queue")
 
     if isinstance(signal, EndOfBusinessDayReached):
         return _on_end_of_business_day(case)
@@ -340,11 +351,19 @@ def decide_next_case_state(
 # ---------------------------------------------------------------------------
 
 
-def _on_business_hours_opened(case: Case) -> CaseDecision:
-    """Cases waiting for hours can begin outreach."""
+def _on_case_created(case: Case) -> CaseDecision:
+    """Lifecycle kickoff: a new case enters and outreach begins immediately.
+
+    The state-machine fires the outreach send unconditionally; the
+    outbound queue worker decides whether the message actually leaves
+    now (hours open) or sits until later (hours closed). This keeps
+    the reducer free of any wall-clock awareness — the "queue holds
+    when closed, drains when open" property is owned by the queue,
+    not by case state transitions.
+    """
 
     if case.state != CaseState.CREATED:
-        return _ignored(case, f"business_hours_irrelevant_at_{case.state.value}")
+        return _ignored(case, f"case_created_irrelevant_at_{case.state.value}")
     return CaseDecision(
         next_state=CaseState.CONTACTING_CUSTOMER,
         actions=(
@@ -356,11 +375,11 @@ def _on_business_hours_opened(case: Case) -> CaseDecision:
             RecordEvent(
                 case_id=case.case_id,
                 event="case.outreach.started",
-                detail="business hours opened — placing initial outreach call",
+                detail="new case — placing initial outreach call",
             ),
         ),
         patch=CasePatch(increment_attempt_count=True),
-        reason="business_hours_opened",
+        reason="case_created",
     )
 
 

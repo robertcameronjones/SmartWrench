@@ -48,15 +48,20 @@ single-process simulator workload this is acceptable; Phase 9 (SQLite)
 introduces real transactions. The driver is structured so that swap is
 a one-line change.
 
-Why ``fire()`` seeds a ``BusinessHoursOpened`` signal
------------------------------------------------------
+Why ``fire()`` seeds a ``CaseCreated`` signal
+---------------------------------------------
 
-The reducer treats ``CREATED`` as "waiting on business hours". The
-simulator (today) and any production caller that wants outreach to
-start immediately must emit the open-hours signal explicitly. Wrapping
-that into ``fire()`` keeps callers from forgetting it; production code
-that wants to defer outreach simply uses ``on_signal`` rather than
-``fire``.
+The reducer's ``CREATED → CONTACTING_CUSTOMER`` transition is driven
+by the explicit ``CaseCreated`` lifecycle signal. ``fire()`` emits it
+immediately after persisting the new case, so callers never have to
+remember to kick the case off themselves. Production callers that want
+to create a case without auto-starting outreach can use the lower
+level repository + ``on_signal`` API directly.
+
+Note: ``fire()`` does **not** check business hours. Sends produced by
+the resulting ``PlaceCall`` flow through the outbound queue, which is
+the single owner of the hours-gating policy — messages enqueued during
+closed hours simply sit until the gate reopens.
 """
 
 from __future__ import annotations
@@ -99,8 +104,8 @@ from guidepoint.case._reducer import (
 )
 from guidepoint.case._repository import CaseRepository
 from guidepoint.case._signals import (
-    BusinessHoursOpened,
     CallEnded,
+    CaseCreated,
     CaseSignal,
     DealerConfirmed,
     DealerRejected,
@@ -199,10 +204,9 @@ class CaseDriver:
     ) -> CaseId:
         """Create a case from a trigger, persist it, and start its loop.
 
-        Seeds the new case with a ``BusinessHoursOpened`` signal so the
-        reducer begins outreach immediately (Phase 4 simulator policy —
-        production deployments can switch to gating on the world clock).
-        Returns the new ``CaseId``.
+        Emits a :class:`CaseCreated` lifecycle signal once the case row
+        is persisted, which the reducer translates into the initial
+        outreach transition. Returns the new ``CaseId``.
         """
 
         case = create_case_from_trigger(
@@ -214,7 +218,12 @@ class CaseDriver:
         )
         self._case_repo.save(case)
         await self._ensure_loop(case.case_id)
-        await self.on_signal(BusinessHoursOpened(timestamp=self._clock.now()))
+        await self.on_signal(
+            CaseCreated(
+                timestamp=self._clock.now(),
+                case_id=case.case_id,
+            )
+        )
         return case.case_id
 
     async def on_signal(self, signal: CaseSignal) -> None:

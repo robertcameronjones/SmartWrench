@@ -62,6 +62,7 @@ from guidepoint.case._signals import (
     BusinessHoursClosed,
     BusinessHoursOpened,
     CallEnded,
+    CaseCreated,
     CustomerOptedIn,
     CustomerOptedOut,
     DealerConfirmed,
@@ -163,6 +164,7 @@ TERMINAL_STATES: tuple[CaseState, ...] = tuple(s for s in CaseState if s.is_term
 # requires an outcome and is exhaustively covered in its own block.
 def _every_simple_signal(case: Case) -> tuple[Any, ...]:
     return (
+        CaseCreated(timestamp=NOW, case_id=case.case_id),
         BusinessHoursOpened(timestamp=NOW),
         BusinessHoursClosed(timestamp=NOW),
         EndOfBusinessDayReached(timestamp=NOW),
@@ -269,30 +271,47 @@ def test_opt_in_does_not_move_case() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Happy-path: CREATED -> CONTACTING via business hours opening.
+# Happy-path: CREATED -> CONTACTING via CaseCreated lifecycle signal.
 # ---------------------------------------------------------------------------
 
 
-def test_business_hours_opens_starts_outreach_from_created() -> None:
+def test_case_created_starts_outreach_from_created() -> None:
     case = _case(state=CaseState.CREATED)
     decision = decide_next_case_state(
-        case, BusinessHoursOpened(timestamp=NOW), now=NOW
+        case,
+        CaseCreated(timestamp=NOW, case_id=case.case_id),
+        now=NOW,
     )
     assert decision.next_state == CaseState.CONTACTING_CUSTOMER
     assert decision.patch == CasePatch(increment_attempt_count=True)
+    assert decision.reason == "case_created"
     calls = [a for a in decision.actions if isinstance(a, PlaceCall)]
     assert len(calls) == 1
     assert calls[0].stage == CallStage.OUTREACH
     assert calls[0].attempt_number == 1
 
 
-def test_business_hours_irrelevant_after_outreach_started() -> None:
+def test_case_created_irrelevant_after_outreach_started() -> None:
     case = _case(state=CaseState.CONTACTING_CUSTOMER, attempt_count=1)
     decision = decide_next_case_state(
-        case, BusinessHoursOpened(timestamp=NOW), now=NOW
+        case,
+        CaseCreated(timestamp=NOW, case_id=case.case_id),
+        now=NOW,
     )
     assert decision.is_noop
-    assert decision.reason.startswith("ignored:business_hours_irrelevant")
+    assert decision.reason.startswith("ignored:case_created_irrelevant")
+
+
+def test_business_hours_signals_are_ignored_by_reducer() -> None:
+    """The reducer has no opinion on hours — the queue worker owns that gate."""
+    case = _case(state=CaseState.CREATED)
+    for signal in (
+        BusinessHoursOpened(timestamp=NOW),
+        BusinessHoursClosed(timestamp=NOW),
+    ):
+        decision = decide_next_case_state(case, signal, now=NOW)
+        assert decision.is_noop, signal
+        assert "hours_handled_by_outbound_queue" in decision.reason, signal
 
 
 # ---------------------------------------------------------------------------
