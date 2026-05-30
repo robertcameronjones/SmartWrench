@@ -1,36 +1,46 @@
-"""Outbound worker — polls the queue, applies gates, dispatches.
+"""Outbound worker — edge-triggered drain of the outbound queue.
 
-The worker is a tiny asyncio task. On every tick it:
+The worker holds one :class:`asyncio.Event` ("wake") and does nothing
+until something sets it. The two legitimate setters are:
 
-1. Asks the :class:`BusinessHoursPort` whether sending is allowed.
-   If not, sleeps the poll interval and re-checks.
-2. Claims the oldest ready item from the :class:`OutboundQueue`. If
-   nothing is ready, sleeps and re-polls.
-3. Checks :class:`SmsConsentPort` for the item's destination phone.
-   If consent is gone, marks the item ``BLOCKED`` and continues.
-4. Invokes the channel :class:`OutboundDispatcher`. On success, marks
-   the item ``SENT`` with the channel-assigned id (Twilio's MessageSid
-   for SMS). On a :class:`PermanentDispatchError`, marks ``FAILED``.
-   On a :class:`TransientDispatchError` (or any other exception),
-   either retries with exponential backoff or — if the attempt budget
-   is exhausted — marks ``FAILED``.
+- :meth:`OutboundWorker.notify` — called by the sender after an
+  ``enqueue`` so a freshly-arrived item is processed immediately.
+- :meth:`OutboundWorker.notify` again — called by the simulator
+  slider (or the production business-hours service) the instant the
+  gate flips ``open=True`` so held items drain immediately.
 
-The worker holds no state of its own. Crash mid-dispatch leaves an
-item ``IN_FLIGHT``; on next process start :meth:`OutboundQueue.
-reclaim_stale_in_flight` puts it back to ``PENDING``. Twilio dedupes
-nothing for us — at-least-once delivery is the contract. The
-``attempts`` column lets operators see double-send candidates.
+There is **no polling**. The worker sleeps until a wake, checks the
+business-hours boolean, and either drains every ready item in FIFO
+order or goes back to sleep. Transient-failure retries self-schedule
+their own wake via ``loop.call_later`` so even backoff is edge-driven.
+
+Result reporting is push, not pull. After each successful dispatch
+the worker calls an async ``on_dispatched`` callback (typically wired
+to :meth:`CaseDriver.on_signal`) with a fresh :class:`OutboundDispatched`
+signal carrying the case id, item id, Twilio MessageSid, and target
+phone. The case driver routes that into the case's existing signal
+queue; the reducer audits it with a ``RecordEvent`` action — no state
+transition.
+
+Blocked sends (consent revoked between enqueue and dispatch) and
+failed sends (transient errors exhausted) are logged at warn level
+via structlog only. The state machine has its own paths for both
+(``CustomerOptedOut``, session inactivity timeout → ``CallEnded``);
+duplicate signalling would just create noise.
 """
 
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import final
 
 import structlog
 
+from guidepoint.case._signals import OutboundDispatched
 from guidepoint.clock import Clock
 from guidepoint.outbound._ports import (
     BusinessHoursPort,
@@ -48,33 +58,39 @@ _log = structlog.get_logger(__name__)
 
 
 class TransientDispatchError(RuntimeError):
-    """Channel dispatch failed in a way that's worth retrying.
+    """Channel dispatch failed in a way worth retrying.
 
-    Examples: HTTP 5xx from Twilio, network timeout, rate limit.
-    The worker requeues the item with a backoff delay.
+    HTTP 5xx, timeout, rate limit. The worker requeues with backoff
+    and schedules a wake at the retry time.
     """
 
 
 class PermanentDispatchError(RuntimeError):
     """Channel dispatch failed in a way retries can't fix.
 
-    Examples: invalid phone format, account suspended, body exceeds
-    channel limits. The worker marks the item ``FAILED`` immediately.
+    Invalid phone format, account suspended, message exceeds channel
+    limits. The worker marks the item ``FAILED`` immediately.
     """
 
 
 # ---------------------------------------------------------------------------
-# Config + worker
+# Config + callbacks
 # ---------------------------------------------------------------------------
+
+
+#: Async callback the worker invokes after each successful dispatch. The
+#: signal it receives is already a typed ``OutboundDispatched`` ready to
+#: feed into ``CaseDriver.on_signal``. None disables push-reporting.
+OnDispatchedCallback = Callable[[OutboundDispatched], Awaitable[None]]
 
 
 @final
 @dataclass(frozen=True, slots=True)
 class OutboundWorkerConfig:
-    """Tunables for :class:`OutboundWorker`. Frozen so they round-trip safely."""
+    """Tunables for :class:`OutboundWorker`. Frozen so they round-trip safely.
 
-    #: How long between ticks when the queue is empty or all gates are closed.
-    poll_interval: timedelta = timedelta(milliseconds=250)
+    Notably *no* poll interval: the worker is event-driven end to end.
+    """
 
     #: Initial backoff after a transient dispatch error. Doubles per attempt.
     initial_backoff: timedelta = timedelta(seconds=2)
@@ -82,21 +98,14 @@ class OutboundWorkerConfig:
     #: Cap on the backoff window so it doesn't grow unbounded.
     max_backoff: timedelta = timedelta(minutes=5)
 
-    #: A worker tick that started before ``now - reclaim_after`` and never
-    #: completed is considered crashed. Items it claimed get returned to
-    #: ``PENDING`` so a fresh tick can re-grab them.
+    #: An ``IN_FLIGHT`` row whose ``claimed_at`` is older than this on
+    #: worker startup is considered orphaned and reclaimed to ``PENDING``.
     reclaim_after: timedelta = timedelta(minutes=1)
 
 
 @final
 class OutboundWorker:
-    """Drains an :class:`OutboundQueue` into a channel dispatcher.
-
-    The worker is single-shot per process: instantiate one, call
-    :meth:`start` to spawn its background task, and :meth:`stop` to
-    request clean shutdown. ``await``\\ ing :meth:`stop` blocks until
-    the current tick finishes.
-    """
+    """Edge-triggered drain of the outbound queue."""
 
     def __init__(
         self,
@@ -107,6 +116,7 @@ class OutboundWorker:
         hours: BusinessHoursPort,
         clock: Clock,
         config: OutboundWorkerConfig | None = None,
+        on_dispatched: OnDispatchedCallback | None = None,
     ) -> None:
         self._queue = queue
         self._dispatcher = dispatcher
@@ -114,19 +124,55 @@ class OutboundWorker:
         self._hours = hours
         self._clock = clock
         self._config = config or OutboundWorkerConfig()
+        self._on_dispatched = on_dispatched
+        self._wake = asyncio.Event()
         self._task: asyncio.Task[None] | None = None
-        self._stop_event = asyncio.Event()
+        self._stopped = False
+        self._loop: asyncio.AbstractEventLoop | None = None
 
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
 
-    async def start(self) -> None:
-        """Spawn the worker's background task.
+    def notify(self) -> None:
+        """Wake the worker. Idempotent.
 
-        Reclaims any stale ``IN_FLIGHT`` items from a previous process
-        before the first tick runs, so crash-recovery is built into the
-        startup path.
+        Call from the worker's event loop. Cross-thread callers must
+        use :meth:`notify_threadsafe` instead — ``asyncio.Event.set`` is
+        not thread-safe.
+        """
+        self._wake.set()
+
+    def notify_threadsafe(self) -> None:
+        """Wake the worker from another thread. Idempotent.
+
+        Schedules :meth:`notify` on the worker's event loop via
+        ``loop.call_soon_threadsafe``. Safe to call before
+        :meth:`start` — falls back to setting the event directly
+        (worker isn't running yet so it'll see the set on first wait).
+        """
+        loop = self._loop
+        if loop is None:
+            self._wake.set()
+            return
+        loop.call_soon_threadsafe(self._wake.set)
+
+    def set_on_dispatched(self, callback: OnDispatchedCallback | None) -> None:
+        """Install (or clear) the post-dispatch callback.
+
+        Useful when the case driver — which owns the callback's target
+        (``case_driver.on_signal``) — is built after the worker. The
+        simulator wiring layer takes advantage of this to break the
+        worker ↔ driver circular dependency.
+        """
+        self._on_dispatched = callback
+
+    async def start(self) -> None:
+        """Reclaim stale rows, spawn the run task, and pre-wake once.
+
+        The pre-wake ensures any items already PENDING in the queue (from
+        a prior process, or from enqueues that landed between worker
+        startup boundaries) are drained without waiting for a new event.
         """
         if self._task is not None and not self._task.done():
             raise RuntimeError("OutboundWorker.start called twice")
@@ -134,33 +180,33 @@ class OutboundWorker:
         reclaimed = self._queue.reclaim_stale_in_flight(older_than=cutoff)
         if reclaimed:
             _log.info("outbound.worker.startup.reclaimed", count=reclaimed)
-        self._stop_event.clear()
+        self._stopped = False
+        self._loop = asyncio.get_running_loop()
+        self._wake.set()
         self._task = asyncio.create_task(self._run(), name="outbound-worker")
 
     async def stop(self) -> None:
-        """Ask the worker to finish its current tick and exit."""
-        self._stop_event.set()
+        """Ask the worker to finish + exit. Idempotent."""
+        self._stopped = True
+        self._wake.set()
         if self._task is not None:
             try:
                 await asyncio.wait_for(self._task, timeout=5.0)
             except TimeoutError:
                 self._task.cancel()
-                try:
+                with suppress(BaseException):
                     await self._task
-                except (asyncio.CancelledError, Exception):  # noqa: BLE001 - drain
-                    pass
             self._task = None
 
     # ------------------------------------------------------------------
-    # Tick — public for ergonomic tests (no need to spin a real task)
+    # Test-friendly entry points — one synchronous drain pass per call.
     # ------------------------------------------------------------------
 
     async def tick(self) -> OutboundItem | None:
-        """Run exactly one drain attempt. Returns the item processed (if any).
+        """Process exactly one ready item (or no-op). Used by tests.
 
-        Test-facing entry point. Production callers should use
-        :meth:`start` / :meth:`stop`; tests use ``tick`` to step the
-        worker deterministically.
+        Returns the processed item (in its final state) or ``None`` if
+        the gate was closed or nothing was ready.
         """
         if not self._hours.hours_open():
             return None
@@ -174,43 +220,53 @@ class OutboundWorker:
     # ------------------------------------------------------------------
 
     async def _run(self) -> None:
-        poll_seconds = self._config.poll_interval.total_seconds()
-        while not self._stop_event.is_set():
+        """Main loop. Sleeps until ``notify`` then drains."""
+        while not self._stopped:
+            await self._wake.wait()
+            self._wake.clear()
+            if self._stopped:
+                break
+            if not self._hours.hours_open():
+                # Gate is closed; sit and wait for the next wake. The
+                # slider's ``put_business_hours`` will set the event the
+                # moment it flips open.
+                continue
+            await self._drain_ready()
+
+    async def _drain_ready(self) -> None:
+        """Claim + process every ready item until the queue is empty or hours close."""
+        while not self._stopped and self._hours.hours_open():
+            item = self._queue.claim_next_ready(now=self._clock.now())
+            if item is None:
+                return
             try:
-                processed = await self.tick()
-            except Exception:  # noqa: BLE001 - worker must not die
-                _log.exception("outbound.worker.tick_errored")
-                processed = None
-            if processed is None:
-                try:
-                    await asyncio.wait_for(
-                        self._stop_event.wait(), timeout=poll_seconds
-                    )
-                except TimeoutError:
-                    pass
+                await self._process(item)
+            except Exception:  # noqa: BLE001 - worker must never die
+                _log.exception(
+                    "outbound.worker.process_errored",
+                    item_id=item.item_id,
+                )
 
     async def _process(self, item: OutboundItem) -> OutboundItem:
-        """Dispatch one claimed item; return the final-state item."""
-        # Consent gate. Permanent — blocked items stay blocked even if
-        # the customer later opts back in (a new send would succeed,
-        # but this queued one is dead).
+        """Dispatch one claimed item; return its final-state row."""
+        # Consent race guard. The case state machine already terminates
+        # opted-out cases via ``CustomerOptedOut``; this catches the
+        # narrow window where a STOP arrived between enqueue and the
+        # worker getting to the item. Block silently — the case is
+        # already being torn down, no need to signal it again.
         if not self._consent.sms_consent_for_phone(item.to_phone):
             blocked = self._queue.mark_blocked(
                 item_id=item.item_id,
-                reason=f"sms consent revoked for {item.to_phone}",
+                reason=f"consent revoked for {item.to_phone}",
             )
-            _log.info(
-                "outbound.worker.blocked.consent",
+            _log.warning(
+                "outbound.worker.blocked",
                 item_id=item.item_id,
                 case_id=str(item.case_id),
                 to=item.to_phone,
             )
             return blocked
 
-        # Dispatch. Three outcome classes:
-        #   - success → mark_sent
-        #   - permanent error → mark_failed
-        #   - transient error / unknown exception → retry-or-fail
         try:
             sid = await asyncio.to_thread(
                 self._dispatcher, to=item.to_phone, body=item.body
@@ -243,12 +299,35 @@ class OutboundWorker:
             twilio_sid=sid,
             attempts=item.attempts,
         )
+        # Push the "I sent it" signal back into the case driver's
+        # existing signal queue. This is the single result-reporting
+        # path; the reducer audits it and does not change state.
+        if self._on_dispatched is not None:
+            try:
+                await self._on_dispatched(
+                    OutboundDispatched(
+                        timestamp=self._clock.now(),
+                        case_id=sent.case_id,
+                        item_id=sent.item_id,
+                        twilio_sid=sent.twilio_sid,
+                        to_phone=sent.to_phone,
+                    )
+                )
+            except Exception:  # noqa: BLE001 - reporting must not break sending
+                _log.exception(
+                    "outbound.worker.on_dispatched_errored",
+                    item_id=sent.item_id,
+                )
         return sent
 
     def _handle_transient(
         self, item: OutboundItem, exc: BaseException
     ) -> OutboundItem:
-        """Either retry with backoff or mark FAILED if budget exhausted."""
+        """Retry with backoff or mark FAILED if attempts are exhausted.
+
+        On retry, schedule a wake at the retry time so the worker
+        re-considers the item without polling.
+        """
         if item.attempts >= item.max_attempts:
             failed = self._queue.mark_failed(
                 item_id=item.item_id,
@@ -278,16 +357,21 @@ class OutboundWorker:
             retry_at=retry_at.isoformat(),
             error=str(exc),
         )
+        # Self-schedule a wake at retry_at so we don't need a polling
+        # loop to discover items have come back to PENDING.
+        try:
+            loop = asyncio.get_running_loop()
+            loop.call_later(backoff.total_seconds(), self._wake.set)
+        except RuntimeError:
+            # Not in an event loop (e.g., synchronous tick() under a
+            # test that doesn't keep the loop spinning). Tests that
+            # care about retry timing drive notify() explicitly.
+            pass
         return requeued
 
     def _backoff_for_attempt(self, attempts: int) -> timedelta:
-        """Exponential backoff capped at ``max_backoff``.
-
-        ``attempts`` is the post-claim count, so the first failure has
-        ``attempts == 1``. Backoff doubles from there: 2s, 4s, 8s, ...
-        """
+        """Exponential backoff capped at ``max_backoff``."""
         seconds = self._config.initial_backoff.total_seconds()
-        # Double per failure beyond the first.
         for _ in range(max(0, attempts - 1)):
             seconds *= 2
         capped = min(seconds, self._config.max_backoff.total_seconds())
@@ -295,6 +379,7 @@ class OutboundWorker:
 
 
 __all__ = [
+    "OnDispatchedCallback",
     "OutboundWorker",
     "OutboundWorkerConfig",
     "PermanentDispatchError",

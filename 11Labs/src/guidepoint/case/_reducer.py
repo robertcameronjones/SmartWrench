@@ -58,6 +58,7 @@ from guidepoint.case._signals import (
     CustomerOptedOut,
     DealerConfirmed,
     DealerRejected,
+    OutboundDispatched,
     DealerSlotsListed,
     EndOfBusinessDayReached,
     FinalReminderDue,
@@ -309,6 +310,20 @@ def decide_next_case_state(
     if isinstance(signal, EndOfBusinessDayReached):
         return _on_end_of_business_day(case)
 
+    # ---- Outbound queue result (audit-only push from worker) -------------
+    #
+    # The single "I sent it" report from the queue. The state machine
+    # does not transition on it — case transitions continue to be driven
+    # by ``CallEnded`` and the geofence / reminder signals — but the
+    # operator audit trail wants to see exactly when each message left
+    # with its real Twilio MessageSid. Blocked / failed dispatches are
+    # worker-level structlog warnings only; the case has its own paths
+    # (``CustomerOptedOut``, session timeout → ``CallEnded(inconclusive)``)
+    # for those.
+
+    if isinstance(signal, OutboundDispatched):
+        return _on_outbound_dispatched(case, signal)
+
     # ---- Per-case targeted signals ---------------------------------------
 
     if isinstance(signal, CallEnded):
@@ -349,6 +364,27 @@ def decide_next_case_state(
 # Per-signal handlers. Each one is a small, focused function so the
 # (state, signal) cells in the test grid map 1:1 to readable branches.
 # ---------------------------------------------------------------------------
+
+
+def _on_outbound_dispatched(
+    case: Case, signal: OutboundDispatched
+) -> CaseDecision:
+    """A queued outbound message just left for Twilio. Audit only."""
+
+    return CaseDecision(
+        next_state=case.state,
+        actions=(
+            RecordEvent(
+                case_id=case.case_id,
+                event="case.outbound.dispatched",
+                detail=(
+                    f"to={signal.to_phone} sid={signal.twilio_sid} "
+                    f"item={signal.item_id}"
+                ),
+            ),
+        ),
+        reason="outbound_dispatched",
+    )
 
 
 def _on_case_created(case: Case) -> CaseDecision:

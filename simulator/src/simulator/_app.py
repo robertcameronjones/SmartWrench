@@ -214,6 +214,14 @@ def build_app(
     )
     driver_holder["driver"] = case_driver
 
+    # Now that the driver exists, wire the worker's "I sent it"
+    # callback back into the driver's signal queue. The reducer
+    # records the moment via RecordEvent and does not change state;
+    # this is purely the audit join between the queued `item_id` (in
+    # the session Turn) and the real Twilio MessageSid.
+    if outbound_bundle is not None:
+        outbound_bundle.worker.set_on_dispatched(case_driver.on_signal)
+
     geofence_forwarder = build_geofence_forwarder(
         case_driver=case_driver,
         clock=resolved_clock,

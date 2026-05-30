@@ -1,293 +1,218 @@
-"""Tests for ``build_queued_twilio_sender``.
+"""Tests for the fire-and-forget ``build_queued_twilio_sender``.
 
-The queued sender bridges the synchronous ``TwilioSend`` shape that
-``SmsCallSession`` expects to the asynchronous ``OutboundQueue``. The
-tests exercise:
+The sender now does three things and only three things:
 
-- Happy path: enqueue + worker drains + SID returned.
-- Blocked (consent revoked) → :class:`SmsConsentError`.
-- Failed (transient errors exhausted) → ``RuntimeError`` with reason.
-- Timeout (hours closed, never drained) → :class:`QueueWaitTimeout`,
-  but the queue item is still PENDING for later delivery.
+1. Enqueue the outbound item in the SQLite queue.
+2. Optionally wake the worker via ``notify_worker``.
+3. Return the queue ``item_id`` — used as the session ``Turn``'s audit
+   handle until the worker reports the real Twilio MessageSid via the
+   ``OutboundDispatched`` signal.
 
-The tests run the worker in a separate thread (or tick it manually)
-so the sender's blocking poll loop sees real state transitions.
+There is no polling, no waiting for the worker, no timeout. Failure
+modes the older sender used to raise (``SmsConsentError``,
+``QueueWaitTimeout``) are now worker-side concerns and surface
+through structlog warns + queue state — not through the sender call
+site.
 """
 
 from __future__ import annotations
 
-import asyncio
-import threading
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import cast
 
 import pytest
 
 from guidepoint.case._models import CaseId
-from guidepoint.outbound import (
-    OutboundWorker,
-    OutboundWorkerConfig,
-    PermanentDispatchError,
-)
-from guidepoint.persistence import OutboundState, build_sqlite_outbound_queue
+from guidepoint.persistence import OutboundQueue, OutboundState, build_sqlite_outbound_queue
 
-from sms_adapter import (
-    QueueWaitTimeout,
-    SmsConsentError,
-    build_queued_twilio_sender,
-)
+from sms_adapter import QueueEnqueueError, build_queued_twilio_sender
 
 NOW = datetime(2026, 6, 1, 14, 0, tzinfo=UTC)
 
 
 # ---------------------------------------------------------------------------
-# Test doubles (mirror the worker tests; kept local to avoid cross-pkg deps)
+# Tiny fakes
 # ---------------------------------------------------------------------------
 
 
-class SystemClock:
-    """Real wall clock — needed so the sender's blocking poll measures
-    real elapsed time against ``max_wait``."""
+class FrozenClock:
+    """Returns a fixed datetime. The sender doesn't need a real clock."""
+
+    def __init__(self, *, t: datetime = NOW) -> None:
+        self._t = t
 
     def now(self) -> datetime:
-        # Anchor against NOW + wall-time offset so timestamps look sensible.
-        # We don't actually use this for hold_until comparisons in these
-        # tests (worker side uses its own clock); for the sender's wait
-        # loop it just needs to advance monotonically.
-        return datetime.now(UTC)
-
-
-class FakeHours:
-    def __init__(self, *, open: bool = True) -> None:
-        self.open = open
-
-    def hours_open(self) -> bool:
-        return self.open
-
-
-class FakeConsent:
-    def __init__(self, *, allow: bool = True) -> None:
-        self.allow = allow
-
-    def sms_consent_for_phone(self, phone: str) -> bool:
-        return self.allow
-
-
-class RecordingDispatcher:
-    def __init__(self, *, script: list | None = None) -> None:
-        self.script = list(script or [])
-        self.calls: list[tuple[str, str]] = []
-
-    def __call__(self, *, to: str, body: str) -> str:
-        self.calls.append((to, body))
-        if not self.script:
-            return f"SM_default_{len(self.calls)}"
-        action = self.script.pop(0)
-        if isinstance(action, Exception):
-            raise action
-        return action
-
-
-def _start_worker_in_thread(worker: OutboundWorker) -> tuple[threading.Thread, asyncio.AbstractEventLoop]:
-    """Spawn an event loop in a daemon thread and run the worker on it."""
-    loop = asyncio.new_event_loop()
-
-    def _run() -> None:
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(worker.start())
-        loop.run_forever()
-
-    thread = threading.Thread(target=_run, daemon=True)
-    thread.start()
-    return thread, loop
-
-
-def _stop_worker_thread(
-    worker: OutboundWorker,
-    thread: threading.Thread,
-    loop: asyncio.AbstractEventLoop,
-) -> None:
-    fut = asyncio.run_coroutine_threadsafe(worker.stop(), loop)
-    fut.result(timeout=10)
-    loop.call_soon_threadsafe(loop.stop)
-    thread.join(timeout=10)
+        return self._t
 
 
 # ---------------------------------------------------------------------------
-# Happy path — sender enqueues, worker drains, SID returns
+# Core fire-and-forget contract
 # ---------------------------------------------------------------------------
 
 
-def test_sender_returns_sid_when_worker_drains(tmp_path: Path) -> None:
+def test_sender_returns_item_id_immediately(tmp_path: Path) -> None:
+    """The sender must not block — it returns the queue item id and is done."""
     queue = build_sqlite_outbound_queue(db_path=tmp_path / "q.db")
-    dispatcher = RecordingDispatcher(script=["SM_happy_path"])
-    worker = OutboundWorker(
-        queue=queue,
-        dispatcher=dispatcher,
-        consent=FakeConsent(),
-        hours=FakeHours(),
-        clock=SystemClock(),
-        config=OutboundWorkerConfig(poll_interval=timedelta(milliseconds=50)),
-    )
-    thread, loop = _start_worker_in_thread(worker)
-    try:
-        sender = build_queued_twilio_sender(
-            queue=queue,
-            clock=SystemClock(),
-            poll_interval=timedelta(milliseconds=50),
-            max_wait=timedelta(seconds=5),
-        )
-        sid = sender(case_id=CaseId("case_x"), to="+15555550100", body="hello")
-    finally:
-        _stop_worker_thread(worker, thread, loop)
+    sender = build_queued_twilio_sender(queue=queue, clock=FrozenClock())
 
-    assert sid == "SM_happy_path"
-    assert dispatcher.calls == [("+15555550100", "hello")]
+    started = time.monotonic()
+    result = sender(case_id=CaseId("case_fire_forget"), to="+15555550100", body="hi")
+    elapsed = time.monotonic() - started
+
+    assert isinstance(result, str)
+    assert result.startswith("out_")
+    # Generous bound — the only work is one SQLite INSERT. If this ever
+    # creeps over a fraction of a second, something is wrong (e.g. an
+    # accidental wait loop has crept back in).
+    assert elapsed < 0.25
 
 
-# ---------------------------------------------------------------------------
-# Consent revoked — worker marks BLOCKED, sender raises SmsConsentError
-# ---------------------------------------------------------------------------
-
-
-def test_sender_raises_consent_error_when_blocked(tmp_path: Path) -> None:
+def test_sender_persists_item_as_pending(tmp_path: Path) -> None:
     queue = build_sqlite_outbound_queue(db_path=tmp_path / "q.db")
-    dispatcher = RecordingDispatcher()
-    worker = OutboundWorker(
-        queue=queue,
-        dispatcher=dispatcher,
-        consent=FakeConsent(allow=False),
-        hours=FakeHours(),
-        clock=SystemClock(),
-        config=OutboundWorkerConfig(poll_interval=timedelta(milliseconds=50)),
-    )
-    thread, loop = _start_worker_in_thread(worker)
-    try:
-        sender = build_queued_twilio_sender(
-            queue=queue,
-            clock=SystemClock(),
-            poll_interval=timedelta(milliseconds=50),
-            max_wait=timedelta(seconds=5),
-        )
-        with pytest.raises(SmsConsentError):
-            sender(case_id=CaseId("case_x"), to="+15555550100", body="hello")
-    finally:
-        _stop_worker_thread(worker, thread, loop)
+    sender = build_queued_twilio_sender(queue=queue, clock=FrozenClock())
 
-    assert dispatcher.calls == []
+    item_id = sender(case_id=CaseId("case_persist"), to="+15555550101", body="persisted")
+
+    stored = queue.get(item_id)
+    assert stored is not None
+    assert stored.state == OutboundState.PENDING
+    assert stored.case_id == CaseId("case_persist")
+    assert stored.to_phone == "+15555550101"
+    assert stored.body == "persisted"
+    assert stored.twilio_sid == ""  # worker fills this in later
 
 
 # ---------------------------------------------------------------------------
-# Permanent dispatch error → FAILED → RuntimeError
+# Worker wake contract
 # ---------------------------------------------------------------------------
 
 
-def test_sender_raises_runtime_error_on_permanent_failure(tmp_path: Path) -> None:
+def test_sender_wakes_worker_via_notify_callback(tmp_path: Path) -> None:
+    """Every successful enqueue must invoke ``notify_worker``."""
     queue = build_sqlite_outbound_queue(db_path=tmp_path / "q.db")
-    dispatcher = RecordingDispatcher(
-        script=[PermanentDispatchError("invalid phone")]
-    )
-    worker = OutboundWorker(
+    notifications: list[None] = []
+    sender = build_queued_twilio_sender(
         queue=queue,
-        dispatcher=dispatcher,
-        consent=FakeConsent(),
-        hours=FakeHours(),
-        clock=SystemClock(),
-        config=OutboundWorkerConfig(poll_interval=timedelta(milliseconds=50)),
+        clock=FrozenClock(),
+        notify_worker=lambda: notifications.append(None),
     )
-    thread, loop = _start_worker_in_thread(worker)
-    try:
-        sender = build_queued_twilio_sender(
-            queue=queue,
-            clock=SystemClock(),
-            poll_interval=timedelta(milliseconds=50),
-            max_wait=timedelta(seconds=5),
-        )
-        with pytest.raises(RuntimeError, match="invalid phone"):
-            sender(case_id=CaseId("case_x"), to="+1555", body="bad")
-    finally:
-        _stop_worker_thread(worker, thread, loop)
+
+    sender(case_id=CaseId("case_wake"), to="+15555550102", body="ping")
+    sender(case_id=CaseId("case_wake"), to="+15555550102", body="pong")
+
+    assert len(notifications) == 2
+
+
+def test_sender_swallows_notify_failure(tmp_path: Path) -> None:
+    """A broken notifier must not break enqueue — the item is already saved."""
+    queue = build_sqlite_outbound_queue(db_path=tmp_path / "q.db")
+
+    def _broken() -> None:
+        raise RuntimeError("worker is unhappy")
+
+    sender = build_queued_twilio_sender(
+        queue=queue,
+        clock=FrozenClock(),
+        notify_worker=_broken,
+    )
+
+    item_id = sender(case_id=CaseId("case_robust"), to="+15555550103", body="ok")
+
+    stored = queue.get(item_id)
+    assert stored is not None
+    assert stored.state == OutboundState.PENDING
+
+
+def test_sender_works_without_notify_callback(tmp_path: Path) -> None:
+    """``notify_worker`` is optional — tests / standalone uses don't need a worker."""
+    queue = build_sqlite_outbound_queue(db_path=tmp_path / "q.db")
+    sender = build_queued_twilio_sender(queue=queue, clock=FrozenClock())
+
+    item_id = sender(case_id=CaseId("case_solo"), to="+15555550104", body="alone")
+
+    assert queue.get(item_id) is not None
 
 
 # ---------------------------------------------------------------------------
-# Timeout — hours closed, sender bails but item survives
+# Enqueue failure surfaces as QueueEnqueueError
 # ---------------------------------------------------------------------------
 
 
-def test_sender_times_out_when_hours_closed_but_item_persists(tmp_path: Path) -> None:
-    queue = build_sqlite_outbound_queue(db_path=tmp_path / "q.db")
-    dispatcher = RecordingDispatcher()
-    hours = FakeHours(open=False)
-    worker = OutboundWorker(
-        queue=queue,
-        dispatcher=dispatcher,
-        consent=FakeConsent(),
-        hours=hours,
-        clock=SystemClock(),
-        config=OutboundWorkerConfig(poll_interval=timedelta(milliseconds=50)),
+def test_sender_raises_queue_enqueue_error_when_queue_breaks(tmp_path: Path) -> None:
+    class BrokenQueue:
+        def enqueue(self, **kwargs: object) -> object:
+            raise RuntimeError("disk on fire")
+
+    sender = build_queued_twilio_sender(
+        queue=cast(OutboundQueue, BrokenQueue()),
+        clock=FrozenClock(),
     )
-    thread, loop = _start_worker_in_thread(worker)
-    try:
-        sender = build_queued_twilio_sender(
-            queue=queue,
-            clock=SystemClock(),
-            poll_interval=timedelta(milliseconds=50),
-            max_wait=timedelta(milliseconds=400),
-        )
-        with pytest.raises(QueueWaitTimeout):
-            sender(case_id=CaseId("case_closed"), to="+15555550100", body="held")
-    finally:
-        _stop_worker_thread(worker, thread, loop)
 
-    # The dispatcher was never called — hours gate kept it from running.
-    assert dispatcher.calls == []
-    # But the queue still has the item PENDING (or possibly IN_FLIGHT if
-    # the worker grabbed it at the exact moment hours flipped). Either
-    # way it's not terminal — the message will go out later.
-    items = queue.list_for_case(CaseId("case_closed"))
-    assert len(items) == 1
-    assert items[0].state in {OutboundState.PENDING, OutboundState.IN_FLIGHT}
+    with pytest.raises(QueueEnqueueError, match="disk on fire"):
+        sender(case_id=CaseId("case_broken"), to="+15555550105", body="nope")
 
 
-def test_held_item_delivers_when_hours_reopen(tmp_path: Path) -> None:
-    """Operator promise: closed-hours messages aren't lost."""
+# ---------------------------------------------------------------------------
+# Multiple enqueues land in FIFO claim order
+# ---------------------------------------------------------------------------
+
+
+def test_sequential_sends_create_distinct_items_in_order(tmp_path: Path) -> None:
+    """Each call returns a fresh item id; the queue holds them in enqueue order."""
     queue = build_sqlite_outbound_queue(db_path=tmp_path / "q.db")
-    dispatcher = RecordingDispatcher(script=["SM_after_reopen"])
-    hours = FakeHours(open=False)
-    worker = OutboundWorker(
+    clock = FrozenClock()
+    sender = build_queued_twilio_sender(queue=queue, clock=clock)
+
+    ids = [
+        sender(case_id=CaseId("case_fifo"), to="+15555550110", body="A"),
+        sender(case_id=CaseId("case_fifo"), to="+15555550110", body="B"),
+        sender(case_id=CaseId("case_fifo"), to="+15555550110", body="C"),
+    ]
+
+    assert len(set(ids)) == 3  # all distinct
+    listed = queue.list_for_case(CaseId("case_fifo"))
+    assert [item.body for item in listed] == ["A", "B", "C"]
+
+
+# ---------------------------------------------------------------------------
+# Backward-compat advance hour — confirm there's no hidden sleep / poll
+# ---------------------------------------------------------------------------
+
+
+def test_sender_returns_under_a_second_for_a_burst(tmp_path: Path) -> None:
+    """A burst of 50 enqueues should complete in well under a second.
+
+    Regression guard against a future maintainer accidentally putting
+    back a wait loop ("just a quick poll, what could go wrong").
+    """
+    queue = build_sqlite_outbound_queue(db_path=tmp_path / "q.db")
+    sender = build_queued_twilio_sender(queue=queue, clock=FrozenClock())
+
+    started = time.monotonic()
+    for i in range(50):
+        sender(case_id=CaseId(f"case_burst_{i:03d}"), to="+15555550111", body=f"msg {i}")
+    elapsed = time.monotonic() - started
+
+    assert elapsed < 1.0
+
+
+# ---------------------------------------------------------------------------
+# max_attempts honored when enqueueing
+# ---------------------------------------------------------------------------
+
+
+def test_sender_passes_through_max_attempts(tmp_path: Path) -> None:
+    queue = build_sqlite_outbound_queue(db_path=tmp_path / "q.db")
+    sender = build_queued_twilio_sender(
         queue=queue,
-        dispatcher=dispatcher,
-        consent=FakeConsent(),
-        hours=hours,
-        clock=SystemClock(),
-        config=OutboundWorkerConfig(poll_interval=timedelta(milliseconds=50)),
+        clock=FrozenClock(),
+        max_attempts=7,
     )
-    thread, loop = _start_worker_in_thread(worker)
-    try:
-        sender = build_queued_twilio_sender(
-            queue=queue,
-            clock=SystemClock(),
-            poll_interval=timedelta(milliseconds=50),
-            max_wait=timedelta(milliseconds=300),
-        )
-        # First call times out; item is still PENDING.
-        with pytest.raises(QueueWaitTimeout):
-            sender(case_id=CaseId("case_x"), to="+15555550100", body="overnight")
 
-        # Flip hours open — worker drains on its next tick.
-        hours.open = True
+    item_id = sender(case_id=CaseId("case_attempts"), to="+15555550112", body="x")
 
-        # Give the worker a chance to pick the item up.
-        for _ in range(40):
-            items = queue.list_for_case(CaseId("case_x"))
-            if items and items[0].state == OutboundState.SENT:
-                break
-            import time as _t
-            _t.sleep(0.05)
-    finally:
-        _stop_worker_thread(worker, thread, loop)
-
-    assert dispatcher.calls == [("+15555550100", "overnight")]
-    items = queue.list_for_case(CaseId("case_x"))
-    assert items[0].state == OutboundState.SENT
-    assert items[0].twilio_sid == "SM_after_reopen"
+    stored = queue.get(item_id)
+    assert stored is not None
+    assert stored.max_attempts == 7

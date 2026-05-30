@@ -7,10 +7,12 @@ the three handles the rest of the simulator needs:
 - ``worker``: the :class:`OutboundWorker`; the app lifespan starts it
   at boot and stops it at shutdown.
 - ``sender``: a :class:`TwilioSend` that enqueues into ``queue`` and
-  blocks until the worker drains the item. Passed into
-  :func:`build_sms_session` in place of the live Twilio sender, so the
-  call session sees the same interface but every send goes through the
-  queue.
+  wakes the worker via ``worker.notify_threadsafe``. The sender is
+  fire-and-forget — it returns the queue ``item_id`` (used as the
+  audit handle in the session ``Turn``) and never waits for Twilio.
+  Passed into :func:`build_sms_session` in place of the live Twilio
+  sender so the call session sees the same interface but every send
+  goes through the queue.
 
 Wiring rules
 ============
@@ -18,6 +20,12 @@ The queue is **always** SQLite — it's the persistence the queue was
 designed around, and the file is independent of the case repo backend
 (JSON repo + SQLite queue is supported). The DB file lives next to the
 case DB at ``<project_root>/data/outbound_queue.db``.
+
+Result reporting (worker → case driver) is **not** wired here. That
+callback (``case_driver.on_signal``) doesn't exist yet at this point
+in app startup — the bundle is built first, then the driver, then the
+caller installs the callback via ``worker.set_on_dispatched``. This
+breaks the worker ↔ driver circular dependency cleanly.
 
 Returns ``None`` when SMS env vars are missing (consistent with
 :func:`build_sms_session`); the rest of the app boots fine and the
@@ -96,7 +104,15 @@ def build_outbound_dispatch(
         clock=clock,
         config=worker_config,
     )
-    sender = build_queued_twilio_sender(queue=queue, clock=clock)
+    # Fire-and-forget sender: enqueue, wake the worker, return the
+    # queue item_id as the session's audit handle. The real Twilio
+    # MessageSid arrives later via the worker's on_dispatched callback
+    # (wired in once the case driver exists — see _app.build_app).
+    sender = build_queued_twilio_sender(
+        queue=queue,
+        clock=clock,
+        notify_worker=worker.notify_threadsafe,
+    )
 
     _log.info(
         "simulator.outbound.configured",

@@ -168,7 +168,7 @@ from sms_adapter._gated_twilio import (  # noqa: E402
 )
 from sms_adapter._llm import build_litellm_completer  # noqa: E402
 from sms_adapter._queued_twilio import (  # noqa: E402
-    QueueWaitTimeout,
+    QueueEnqueueError,
     build_queued_twilio_sender,
 )
 from sms_adapter._optout import (  # noqa: E402
@@ -206,7 +206,7 @@ __all__ = [
     "is_opt_in_keyword",
     "is_opt_out_keyword",
     "normalize_sms_body",
-    "QueueWaitTimeout",
+    "QueueEnqueueError",
     "SmsConsentChecker",
     "SmsConsentError",
 ]

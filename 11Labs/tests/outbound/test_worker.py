@@ -13,6 +13,9 @@ Properties pinned:
 - Transient error → retry with backoff; exhausted → FAILED.
 - Crash recovery via startup reclaim.
 - FIFO ordering preserved across multiple ticks.
+- ``notify`` wakes the running loop and triggers a drain.
+- ``set_on_dispatched`` callback receives a typed ``OutboundDispatched``
+  signal on every successful dispatch.
 """
 
 from __future__ import annotations
@@ -413,3 +416,166 @@ async def test_start_twice_raises(tmp_path: Path) -> None:
             await worker.start()
     finally:
         await worker.stop()
+
+
+# ---------------------------------------------------------------------------
+# Event-driven wake (notify) + push reporting (set_on_dispatched)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_notify_wakes_running_loop_and_drains(tmp_path: Path) -> None:
+    """A late enqueue + notify must reach the wire without polling."""
+    import asyncio
+
+    dispatcher = RecordingDispatcher(script=["SM_after_notify"])
+    queue, worker = _build_worker(tmp_path, dispatcher=dispatcher)
+
+    await worker.start()
+    try:
+        # Worker is parked on the wake event (initial pre-wake drained
+        # nothing because the queue was empty).
+        _enq(queue, body="late arrival")
+        worker.notify()
+
+        # Give the run loop time to pick up the wake and drain.
+        for _ in range(50):
+            await asyncio.sleep(0.01)
+            if dispatcher.calls:
+                break
+    finally:
+        await worker.stop()
+
+    assert dispatcher.calls == [("+15555550100", "late arrival")]
+
+
+@pytest.mark.asyncio
+async def test_notify_threadsafe_wakes_loop_from_another_thread(tmp_path: Path) -> None:
+    """``notify_threadsafe`` is the sender's thread-safe wake path."""
+    import asyncio
+    import threading
+
+    dispatcher = RecordingDispatcher(script=["SM_threaded"])
+    queue, worker = _build_worker(tmp_path, dispatcher=dispatcher)
+
+    await worker.start()
+    try:
+        # Enqueue from a *different* thread then wake the loop the
+        # thread-safe way, mirroring how the SMS session calls in via
+        # asyncio.to_thread → sender → notify_worker.
+        ready = threading.Event()
+
+        def _enqueue_and_wake() -> None:
+            _enq(queue, body="from another thread")
+            worker.notify_threadsafe()
+            ready.set()
+
+        thread = threading.Thread(target=_enqueue_and_wake, daemon=True)
+        thread.start()
+        thread.join(timeout=2.0)
+        assert ready.is_set()
+
+        for _ in range(50):
+            await asyncio.sleep(0.01)
+            if dispatcher.calls:
+                break
+    finally:
+        await worker.stop()
+
+    assert dispatcher.calls == [("+15555550100", "from another thread")]
+
+
+@pytest.mark.asyncio
+async def test_on_dispatched_callback_invoked_on_successful_send(tmp_path: Path) -> None:
+    """The worker pushes a typed signal back on every SENT transition."""
+    from guidepoint.case._signals import OutboundDispatched
+
+    dispatcher = RecordingDispatcher(script=["SM_callback"])
+    queue, worker = _build_worker(tmp_path, dispatcher=dispatcher)
+    received: list[OutboundDispatched] = []
+
+    async def _capture(signal):  # type: ignore[no-untyped-def]
+        received.append(signal)
+
+    worker.set_on_dispatched(_capture)
+    item = _enq(queue, body="please ping me back")
+
+    await worker.tick()
+
+    assert len(received) == 1
+    signal = received[0]
+    assert isinstance(signal, OutboundDispatched)
+    assert signal.case_id == CaseId("case_001")
+    assert signal.item_id == item.item_id
+    assert signal.twilio_sid == "SM_callback"
+    assert signal.to_phone == "+15555550100"
+
+
+@pytest.mark.asyncio
+async def test_on_dispatched_callback_not_invoked_on_blocked(tmp_path: Path) -> None:
+    """Block / fail outcomes are worker-logged only — no push to driver."""
+    from guidepoint.case._signals import OutboundDispatched
+
+    dispatcher = RecordingDispatcher()
+    consent = FakeConsent()
+    consent.revoke("+15555550100")
+    queue, worker = _build_worker(
+        tmp_path, dispatcher=dispatcher, consent=consent
+    )
+    received: list[OutboundDispatched] = []
+
+    async def _capture(signal):  # type: ignore[no-untyped-def]
+        received.append(signal)
+
+    worker.set_on_dispatched(_capture)
+    _enq(queue)
+
+    await worker.tick()
+
+    assert received == []
+
+
+@pytest.mark.asyncio
+async def test_on_dispatched_callback_not_invoked_on_failed(tmp_path: Path) -> None:
+    """Permanent failures stay inside the worker."""
+    from guidepoint.case._signals import OutboundDispatched
+
+    dispatcher = RecordingDispatcher(
+        script=[PermanentDispatchError("invalid phone")]
+    )
+    queue, worker = _build_worker(tmp_path, dispatcher=dispatcher)
+    received: list[OutboundDispatched] = []
+
+    async def _capture(signal):  # type: ignore[no-untyped-def]
+        received.append(signal)
+
+    worker.set_on_dispatched(_capture)
+    _enq(queue)
+
+    await worker.tick()
+
+    assert received == []
+
+
+@pytest.mark.asyncio
+async def test_callback_failure_does_not_break_dispatch(tmp_path: Path) -> None:
+    """A broken on_dispatched callback must not unwind the SENT row."""
+    dispatcher = RecordingDispatcher(script=["SM_ok"])
+    queue, worker = _build_worker(tmp_path, dispatcher=dispatcher)
+
+    async def _explode(signal):  # type: ignore[no-untyped-def]
+        raise RuntimeError("driver queue full or whatever")
+
+    worker.set_on_dispatched(_explode)
+    item = _enq(queue, body="should still be sent")
+
+    result = await worker.tick()
+
+    assert result is not None
+    assert result.state == OutboundState.SENT
+    assert dispatcher.calls == [("+15555550100", "should still be sent")]
+    # Queue row records SENT — the audit hole is in the case event log,
+    # not in the queue. Operators see the message went out.
+    stored = queue.get(item.item_id)
+    assert stored is not None
+    assert stored.state == OutboundState.SENT

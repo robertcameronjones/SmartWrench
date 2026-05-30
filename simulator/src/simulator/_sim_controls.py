@@ -193,12 +193,15 @@ async def put_business_hours(
     case_driver: CaseDriver,
     clock: Clock,
 ) -> WorldStateResponse:
-    """Flip the world business-hours boolean.
+    """Flip the world business-hours boolean and wake the outbound worker.
 
     No signal is fired into the case driver — the state machine has
-    no opinion on hours. The outbound queue worker polls
-    :meth:`SimulatorWorldState.hours_open` directly and drains queued
-    messages as soon as this boolean flips ``True``.
+    no opinion on hours. The outbound queue worker reads
+    :meth:`SimulatorWorldState.hours_open` directly via the
+    :class:`BusinessHoursPort` protocol, and on the closed→open edge
+    we ping ``worker.notify()`` so the worker wakes immediately and
+    drains anything that built up during the closed window. No
+    polling — the worker is event-driven end-to-end.
 
     The unused ``case_driver`` + ``clock`` parameters are kept so the
     route-builder signature is stable across other handlers and so a
@@ -206,7 +209,13 @@ async def put_business_hours(
     change rather than a route-wiring shuffle.
     """
     del case_driver, clock  # kept for signature stability; see docstring
+    was_open = world.business_hours_open
     world.set_business_hours(open=body.open)
+    if body.open and not was_open:
+        bundle = getattr(request.app.state, "outbound_bundle", None)
+        if bundle is not None:
+            bundle.worker.notify()
+            _log.info("simulator.outbound.worker.notified", reason="hours_opened")
     geofence: SimulatorGeofencePort = request.app.state.geofence_port
     vin = getattr(request.app.state, "active_vehicle_vin", "")
     return get_world_state(world=world, geofence_port=geofence, vehicle_vin=vin)

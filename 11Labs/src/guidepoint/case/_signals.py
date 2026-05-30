@@ -257,6 +257,45 @@ class CaseCreated(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Outbound-queue result signal (worker → state machine, push not pull)
+# ---------------------------------------------------------------------------
+
+
+class OutboundDispatched(BaseModel):
+    """The outbound queue worker just sent one message to Twilio.
+
+    The single "I sent it" report from the queue back into the state
+    machine's existing signal queue. The reducer audits the moment
+    via :class:`RecordEvent` but does not change state — case
+    transitions continue to be driven by :class:`CallEnded` and the
+    geofence / reminder signals.
+
+    Block / fail outcomes inside the queue are **not** signalled back:
+
+    - **Consent refusal** at the worker is a race guard (STOP arrived
+      between enqueue and dispatch). The case state machine's own
+      :class:`CustomerOptedOut` handling already terminates the case;
+      the dropped queue item needs no separate event.
+    - **Retry exhaustion** (Twilio genuinely down) is handled by the
+      session's own inactivity timeout, which eventually fires
+      ``CallEnded(inconclusive)`` and lets the case move on.
+
+    Both are logged at warn level by the worker for operator
+    visibility, but neither flows back into the case as a signal.
+    """
+
+    model_config = _frozen_strict()
+
+    signal_type: Literal["outbound_dispatched"] = "outbound_dispatched"
+    timestamp: UtcDatetime
+    source: EventSource = "system"
+    case_id: CaseId
+    item_id: str = Field(min_length=1)
+    twilio_sid: str = Field(min_length=1)
+    to_phone: str = Field(min_length=1)
+
+
+# ---------------------------------------------------------------------------
 # World-gate signals (driver fans out to every awaiting case)
 #
 # ``BusinessHoursOpened`` and ``BusinessHoursClosed`` are kept in the
@@ -327,7 +366,8 @@ CaseSignal = Annotated[
     | CustomerOptedIn
     | BusinessHoursOpened
     | BusinessHoursClosed
-    | EndOfBusinessDayReached,
+    | EndOfBusinessDayReached
+    | OutboundDispatched,
     Field(discriminator="signal_type"),
 ]
 """Discriminated union of every signal the ``CaseManager`` accepts.
@@ -353,6 +393,7 @@ _CASE_TARGETED_TYPES: tuple[type[BaseModel], ...] = (
     InitialReminderDue,
     FinalReminderDue,
     TimerFired,
+    OutboundDispatched,
 )
 
 _VEHICLE_TARGETED_TYPES: tuple[type[BaseModel], ...] = (
@@ -406,6 +447,7 @@ __all__ = [
     "EndOfBusinessDayReached",
     "FinalReminderDue",
     "InitialReminderDue",
+    "OutboundDispatched",
     "TimerFired",
     "VehicleEnteredDealer",
     "VehicleExitedDealer",

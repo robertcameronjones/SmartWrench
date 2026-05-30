@@ -1,61 +1,69 @@
-"""Queue-backed :class:`TwilioSend` — bridge from ``SmsCallSession`` to the queue.
+"""Queue-backed :class:`TwilioSend` — fire-and-forget bridge to the outbound queue.
 
 The :class:`SmsCallSession` was written assuming a synchronous Twilio
 sender that returns a MessageSid. The outbound queue is asynchronous —
-items land in a SQLite table and a worker drains them. This module
-glues the two together:
+items land in a SQLite table and the :class:`OutboundWorker` drains
+them. This module is the *fire-and-forget* glue between the two:
 
 1. ``_send`` enqueues the outbound item with the case id.
-2. It then polls the queue until the item reaches a terminal state.
-3. On ``SENT``, returns the Twilio MessageSid.
-4. On ``BLOCKED`` (consent revoked), raises :class:`SmsConsentError` so
-   the session can react like before.
-5. On ``FAILED`` (transient errors exhausted), raises ``RuntimeError``
-   surfacing the last error.
-6. On timeout (worker still hasn't reached the item — typically because
-   the business-hours gate is closed), raises :class:`QueueWaitTimeout`.
-   The session treats this like a send failure and bails out; the
-   queue item lives on and the worker will send it whenever the gate
-   reopens. Operators get the message later than the session expected,
-   but they still get it.
+2. It wakes the worker (one ``asyncio.Event`` set) so the item is
+   considered immediately rather than waiting for the next tick.
+3. It returns the queue ``item_id`` and is done. No polling, no wait.
 
-Timeout policy
-==============
+That ``item_id`` flows into the session's ``Turn.twilio_sid`` slot as
+the audit handle. When the worker eventually dispatches the message
+to Twilio, it pushes an :class:`OutboundDispatched` signal carrying
+the same ``item_id`` plus the real Twilio MessageSid into the case
+driver's signal queue. The reducer joins the two via ``RecordEvent``;
+the operator audit log shows both the "queued" moment (session
+``Turn``) and the "sent" moment (case event) with a shared id.
 
-``max_wait`` defaults to 30 seconds, which covers:
+Why fire-and-forget
+===================
 
-- Worker tick interval (250ms) + Twilio round-trip (~1s) during open
-  hours, with margin.
-- A short business-hours close + reopen blip.
+The earlier polling design parked the session task waiting for the
+worker. That meant a single closed-hours window held the session
+hostage for 30 seconds, then surfaced as a ``QueueWaitTimeout`` that
+the session treated as a send failure, which then triggered the call
+manager's retry logic — the "retry loop" you saw on Render. Fire-
+and-forget cuts that whole feedback loop: enqueue, return, let the
+queue do its job. Closed hours just means the item waits in SQLite
+until the worker is woken by the hours-open transition.
 
-It does **not** cover an overnight close. That's deliberate: keeping
-the session task parked overnight is worse than letting it bail —
-the customer reply that eventually arrives will spawn a fresh session
-on demand.
+If Twilio (or the worker) is genuinely broken, the operator notices
+via:
+
+- Queue depth on the ``/health/queues`` endpoint.
+- ``outbound.worker.failed.*`` structlog warns.
+- The session's own inactivity timeout, which eventually fires
+  ``CallEnded(inconclusive)`` and lets the case move on.
 """
 
 from __future__ import annotations
 
-import time
-from datetime import timedelta
+from collections.abc import Callable
 from typing import final
 
 from guidepoint.case._models import CaseId
 from guidepoint.clock import Clock
-from guidepoint.persistence import OutboundQueue, OutboundState
+from guidepoint.persistence import OutboundQueue
 
 from sms_adapter import TwilioSend
-from sms_adapter._gated_twilio import SmsConsentError
+
+#: Thread-safe wake hook the sender invokes after each enqueue. Built
+#: by the simulator wiring layer from ``worker.notify_threadsafe`` so
+#: the worker re-checks the queue immediately.
+WorkerWake = Callable[[], None]
 
 
 @final
-class QueueWaitTimeout(RuntimeError):
-    """Raised when the worker hasn't reached a queued item within ``max_wait``.
+class QueueEnqueueError(RuntimeError):
+    """Raised when the outbound queue itself refuses an enqueue.
 
-    The item is still in the queue and will be sent when the worker
-    next picks it up (typically when business hours reopen). The
-    caller (``SmsCallSession``) treats this as a send failure for its
-    own bookkeeping, but the actual delivery is still pending.
+    Distinct from ``Twilio`` failures (those happen later inside the
+    worker). This is the "we couldn't even park the message in SQLite"
+    case — disk full, schema mismatch, etc. — and is surfaced to the
+    session so the operator sees something is structurally wrong.
     """
 
 
@@ -63,63 +71,51 @@ def build_queued_twilio_sender(
     *,
     queue: OutboundQueue,
     clock: Clock,
-    poll_interval: timedelta = timedelta(milliseconds=100),
-    max_wait: timedelta = timedelta(seconds=30),
+    notify_worker: WorkerWake | None = None,
     max_attempts: int = 3,
 ) -> TwilioSend:
-    """Return a :class:`TwilioSend` that routes through the outbound queue.
+    """Return a :class:`TwilioSend` that enqueues and wakes the worker.
 
-    The returned callable is synchronous (matches ``TwilioSend``) and
-    blocks until the queued item reaches a terminal state or
-    ``max_wait`` elapses. Callers wrap it in ``asyncio.to_thread`` to
-    avoid blocking the event loop.
+    The returned callable is synchronous (matches :class:`TwilioSend`)
+    but it does no waiting — it enqueues the item, optionally wakes
+    the worker, and returns the queue ``item_id`` immediately. Callers
+    can still wrap it in ``asyncio.to_thread`` if they want to keep the
+    event loop tidy, but the operation is so light (one SQLite INSERT
+    plus an event set) that it's not strictly required.
 
-    See module docstring for timeout semantics.
+    ``notify_worker`` should be ``worker.notify_threadsafe`` from the
+    same simulator wiring layer. Optional only for tests that want to
+    enqueue without spinning a worker — the queue itself works fine
+    without a wake.
     """
 
-    poll_seconds = poll_interval.total_seconds()
-    if poll_seconds <= 0:
-        raise ValueError("poll_interval must be positive")
-    if max_wait.total_seconds() <= 0:
-        raise ValueError("max_wait must be positive")
-
     def _send(*, case_id: CaseId, to: str, body: str) -> str:
-        item = queue.enqueue(
-            case_id=case_id,
-            to_phone=to,
-            body=body,
-            enqueued_at=clock.now(),
-            max_attempts=max_attempts,
-        )
-        deadline = clock.now() + max_wait
-        while True:
-            current = queue.get(item.item_id)
-            if current is None:
-                raise RuntimeError(
-                    f"outbound queue lost item {item.item_id!r} "
-                    f"for case {case_id!r}"
-                )
-            if current.state == OutboundState.SENT:
-                return current.twilio_sid
-            if current.state == OutboundState.BLOCKED:
-                raise SmsConsentError(
-                    f"SMS blocked: {current.last_error or 'consent refused'}"
-                )
-            if current.state == OutboundState.FAILED:
-                raise RuntimeError(
-                    f"SMS dispatch failed for {to!r}: {current.last_error}"
-                )
-            if clock.now() >= deadline:
-                raise QueueWaitTimeout(
-                    f"SMS to {to!r} still queued after {max_wait}; "
-                    f"queue item {item.item_id!r} state={current.state.value}"
-                )
-            time.sleep(poll_seconds)
+        try:
+            item = queue.enqueue(
+                case_id=case_id,
+                to_phone=to,
+                body=body,
+                enqueued_at=clock.now(),
+                max_attempts=max_attempts,
+            )
+        except Exception as exc:  # noqa: BLE001 - re-raise as our type
+            raise QueueEnqueueError(
+                f"failed to enqueue SMS for case {case_id!r}: {exc}"
+            ) from exc
+        if notify_worker is not None:
+            try:
+                notify_worker()
+            except Exception:  # noqa: BLE001 - never let wake failure block enqueue
+                # The item is safely in the queue; worst case the worker
+                # picks it up on its next wake from another source.
+                pass
+        return item.item_id
 
     return _send
 
 
 __all__ = [
-    "QueueWaitTimeout",
+    "QueueEnqueueError",
+    "WorkerWake",
     "build_queued_twilio_sender",
 ]
