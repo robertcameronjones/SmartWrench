@@ -16,11 +16,13 @@ SMS inbound webhook
 ===================
 Twilio POSTs every inbound SMS to ``/sms``. The handler resolves
 ``phone -> case_id`` via the SMS routing store, then calls
-``SmsCallSession.deliver_inbound(case_id=...)``. The session's per-case
-``place()`` coroutine dequeues the turn, runs one LLM exchange, and
-sends the reply.
+``CaseDriver.on_inbound_sms(...)``. The driver records the customer
+turn (via the SMS dispatcher) and republishes the body as an
+``InboundSmsReceived`` signal; the reducer decides what happens next
+(digit pick → state move, free text → new ``PlaceCall`` for an
+LLM-composed reply).
 
-STOP / START keywords are handled even when no session is active:
+STOP / START keywords are handled even when no case is active:
 consent is updated in master data and ``CustomerOptedOut`` /
 ``CustomerOptedIn`` signals fan out to active cases via ``CaseDriver``.
 """
@@ -59,8 +61,8 @@ from guidepoint.persistence import build_case_repository
 from sms.server import app as sms_webhook_app
 from sms.server import inbound_sms, register_inbound_handler
 from sms_adapter import (
+    LiveSmsDispatcher,
     RoutingStore,
-    SmsCallSession,
     is_opt_in_keyword,
     is_opt_out_keyword,
     normalize_sms_body,
@@ -103,7 +105,7 @@ def build_app(
     case_repo: CaseRepository | None = None,
     trigger_source: TriggerSource | None = None,
     call_session: CallSession | None = None,
-    sms_session: SmsCallSession | None = None,
+    sms_dispatcher: LiveSmsDispatcher | None = None,
     sms_routing: RoutingStore | None = None,
     probe: ConnectionProbe | None = None,
     user_registry: UserRegistry | None = None,
@@ -116,9 +118,9 @@ def build_app(
     is no stub. Tests that don't want to place real calls inject a
     fake via the ``call_session`` parameter.
 
-    ``sms_session`` + ``sms_routing`` go together: pass both for SMS
+    ``sms_dispatcher`` + ``sms_routing`` go together: pass both for SMS
     testing with fakes, or pass neither to let the factory build the
-    live SMS session from env vars (returns ``(None, None)`` when
+    live SMS dispatcher from env vars (returns ``(None, None)`` when
     Twilio env vars are missing; the Fire route 503s on channel=sms
     in that state).
 
@@ -141,7 +143,7 @@ def build_app(
         clock=resolved_clock,
     )
 
-    call_sessions: dict[Channel, CallSession] = {"voice": resolved_call_session}
+    enabled_channels: set[Channel] = {"voice"}
 
     sms_consent_checker = ProjectSmsConsentChecker(
         project_root=project_root,
@@ -156,13 +158,13 @@ def build_app(
     world_state = SimulatorWorldState()
 
     # Outbound dispatch — SQLite queue + drainer worker. Lives one
-    # layer below the SMS session: the queue holds items, the worker
-    # applies consent + business-hours gates and calls Twilio, the
-    # queued sender (consumed by SmsCallSession via build_sms_session)
-    # enqueues and waits. Tests that inject ``sms_session`` directly
-    # skip this whole pipeline.
+    # layer below the SMS dispatcher: the queue holds items, the
+    # worker applies consent + business-hours gates and calls Twilio,
+    # the queued sender (consumed by the dispatcher built in
+    # build_sms_session) enqueues and returns immediately. Tests that
+    # inject ``sms_dispatcher`` directly skip this whole pipeline.
     outbound_bundle: OutboundBundle | None = None
-    if sms_session is None and sms_routing is None:
+    if sms_dispatcher is None and sms_routing is None:
         outbound_bundle = build_outbound_dispatch(
             project_root=project_root,
             clock=resolved_clock,
@@ -170,7 +172,7 @@ def build_app(
             hours=world_state,
         )
         if outbound_bundle is not None:
-            sms_session, sms_routing = build_sms_session(
+            sms_dispatcher, sms_routing = build_sms_session(
                 project_root=project_root,
                 case_repo=resolved_case_repo,
                 bus=resolved_bus,
@@ -178,8 +180,11 @@ def build_app(
                 twilio_send=outbound_bundle.sender,
             )
 
-    if sms_session is not None:
-        call_sessions["sms"] = sms_session
+    # SMS is no longer a CallManager — it's a turn-by-turn dispatcher
+    # passed to the driver separately. Voice is still the v1
+    # CallManager path until/unless that gets refactored too.
+    if sms_dispatcher is not None:
+        enabled_channels.add("sms")
 
     dealer_port = SimulatorDealerSlotPort()
     geofence_port = SimulatorGeofencePort()
@@ -201,12 +206,11 @@ def build_app(
     timer_service = InMemoryTimerService(clock=resolved_clock, fire=_timer_fire)
 
     call_managers: dict[Channel, CallManager] = {"voice": resolved_call_session}
-    if sms_session is not None:
-        call_managers["sms"] = sms_session
 
     case_driver = CaseDriver(
         case_repo=resolved_case_repo,
         call_managers=call_managers,
+        sms_dispatcher=sms_dispatcher,
         dealer_port=dealer_port,
         timer_service=timer_service,
         bus=resolved_bus,
@@ -217,8 +221,8 @@ def build_app(
     # Now that the driver exists, wire the worker's "I sent it"
     # callback back into the driver's signal queue. The reducer
     # records the moment via RecordEvent and does not change state;
-    # this is purely the audit join between the queued `item_id` (in
-    # the session Turn) and the real Twilio MessageSid.
+    # this is purely the audit join between the queued `item_id`
+    # carried on the assistant turn and the real Twilio MessageSid.
     if outbound_bundle is not None:
         outbound_bundle.worker.set_on_dispatched(case_driver.on_signal)
 
@@ -236,7 +240,7 @@ def build_app(
         probe=resolved_probe,
         clock=resolved_clock,
         templates=templates,
-        enabled_channels=frozenset(call_sessions.keys()),
+        enabled_channels=frozenset(enabled_channels),
         sms_consent_checker=sms_consent_checker,
     )
 
@@ -329,10 +333,9 @@ def build_app(
     app.mount("/twilio", sms_webhook_app, name="twilio")
     app.add_api_route("/sms", inbound_sms, methods=["POST"], name="twilio-inbound")
 
-    if sms_session is not None and sms_routing is not None:
+    if sms_dispatcher is not None and sms_routing is not None:
         register_inbound_handler(
             _make_inbound_handler(
-                session=sms_session,
                 routing=sms_routing,
                 case_driver=case_driver,
                 user_contexts=user_contexts,
@@ -343,7 +346,7 @@ def build_app(
     else:
         _log.warning(
             "simulator.sms.handler.not_registered",
-            reason="sms_session not configured (missing env vars?)",
+            reason="sms_dispatcher not configured (missing env vars?)",
         )
 
     _log.info(
@@ -356,22 +359,35 @@ def build_app(
 
 def _make_inbound_handler(
     *,
-    session: SmsCallSession,
     routing: RoutingStore,
     case_driver: CaseDriver,
     user_contexts: UserContextRegistry,
     clock: Clock,
 ):
-    """Build the coroutine sms.server calls for every inbound SMS."""
+    """Build the coroutine sms.server calls for every inbound SMS.
+
+    The handler does three things, in order:
+
+    1. Opt-out / opt-in keyword detection. Master-data consent is
+       updated regardless of whether the customer's phone matches an
+       active case; the corresponding ``CustomerOptedOut`` /
+       ``CustomerOptedIn`` signal is fanned out to any case that is
+       still open for that phone.
+    2. Phone → case lookup via the routing store. Unknown phones are
+       logged at ``simulator.sms.inbound.unknown_phone`` and dropped
+       (Kate does not reply — there is no case to anchor a reply to).
+    3. For known phones, the driver's ``on_inbound_sms`` is invoked.
+       It records the customer turn (via the SMS dispatcher) and
+       publishes one :class:`InboundSmsReceived` signal; the reducer
+       decides whether the case transitions, whether to emit a fresh
+       ``PlaceCall`` for an LLM-composed reply, or both.
+    """
 
     async def _handler(*, from_number: str, to_number: str, body: str, message_sid: str) -> None:
         normalized = normalize_sms_body(body)
         entry = routing.find_entry(from_number)
         preferred_user_id = entry.user_id if entry is not None else ""
 
-        # Opt-out / opt-in: update master data first, always — regardless of
-        # whether an active session exists. This is the single write path for
-        # consent; the session check below must not intercept STOP before we get here.
         if is_opt_out_keyword(normalized):
             updated = user_contexts.set_opt_status_for_phone(
                 from_number,
@@ -387,15 +403,6 @@ def _make_inbound_handler(
                 master_data_updated=updated,
                 message_sid=message_sid,
             )
-            # Forward STOP to an active session so it terminates with the
-            # correct "opted_out" business outcome rather than timing out.
-            if entry is not None and session.has_active(CaseId(entry.conversation_id)):
-                await session.deliver_inbound(
-                    case_id=CaseId(entry.conversation_id),
-                    from_number=from_number,
-                    body=body,
-                    message_sid=message_sid,
-                )
             return
 
         if is_opt_in_keyword(normalized):
@@ -415,18 +422,20 @@ def _make_inbound_handler(
             )
             return
 
-        # Normal message: route to the active session.
         if entry is None:
             _log.warning(
                 "simulator.sms.inbound.unknown_phone",
                 phone=from_number,
                 body=body[:80],
+                message_sid=message_sid,
             )
             return
+
+        case_id = CaseId(entry.conversation_id)
         try:
-            queued = await session.deliver_inbound(
-                case_id=CaseId(entry.conversation_id),
-                from_number=from_number,
+            await case_driver.on_inbound_sms(
+                case_id=case_id,
+                from_phone=from_number,
                 body=body,
                 message_sid=message_sid,
             )
@@ -434,30 +443,15 @@ def _make_inbound_handler(
             _log.error(
                 "simulator.sms.inbound.failed",
                 phone=from_number,
-                case_id=entry.conversation_id,
+                case_id=str(case_id),
                 user_id=entry.user_id,
                 error=f"{type(exc).__name__}: {exc}",
             )
             return
-        if queued:
-            _log.info(
-                "simulator.sms.inbound.queued",
-                phone=from_number,
-                case_id=entry.conversation_id,
-                user_id=entry.user_id,
-            )
-        else:
-            _log.info(
-                "simulator.sms.inbound.no_active_session",
-                phone=from_number,
-                case_id=entry.conversation_id,
-                user_id=entry.user_id,
-                body=body[:80],
-            )
         _log.info(
-            "simulator.sms.inbound.queued",
+            "simulator.sms.inbound.delivered",
             phone=from_number,
-            case_id=entry.conversation_id,
+            case_id=str(case_id),
             user_id=entry.user_id,
         )
 

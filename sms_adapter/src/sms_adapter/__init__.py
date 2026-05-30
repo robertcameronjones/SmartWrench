@@ -1,22 +1,33 @@
 """SMS conversation adapter — public surface.
 
-The adapter provides one ``CallSession`` implementation (the SMS
-counterpart to ElevenLabs's voice ``_LiveCallSession``) plus the
-adapter-layer factories that build its dependencies from real
-infrastructure (Twilio, LiteLLM, JSON on disk).
+The adapter is now a thin transport + composition layer. It does
+**not** own the conversation state machine; that lives entirely in
+:mod:`guidepoint.case` (the reducer + driver). The adapter provides:
 
-Channel session
-===============
-- ``build_sms_call_session(...)``  — long-running per-case loop.
-  Satisfies the ``guidepoint.case.CallSession`` Protocol so
-  ``CaseManager`` can dispatch SMS cases through the same code path
-  it uses for voice. The session exposes ``deliver_inbound(...)`` so
-  the global Twilio webhook handler can enqueue inbound turns onto
-  the right per-case queue.
+1. **Transport** — :class:`TwilioSend` (outbound) and the simulator
+   webhook (inbound) that resolves ``phone -> case_id`` via the
+   routing store and republishes one
+   :class:`guidepoint.case.InboundSmsReceived` signal per inbound text.
+2. **Composition** — :class:`SmsMessageComposer` builds one assistant
+   reply from the case + stage + history + LLM. The driver calls it
+   for every outbound SMS PlaceCall action.
+3. **Persistence helpers** — :class:`HistoryStore`,
+   :class:`RoutingStore`, plus their JSON-on-disk implementations.
+
+What the adapter no longer owns
+===============================
+- No long-running per-case task — the driver places one SMS per
+  outbound action and the inbound webhook fires one signal per
+  reply. There is no ``SmsCallSession`` and no ``deliver_inbound`` /
+  ``has_active``; those were stateful artifacts of the v1 voice
+  Protocol that don't fit a turn-by-turn SMS flow.
+- No reply classification — digit picks, post-booking
+  confirm / reschedule / cancel, and free-text branches are all
+  decided in :func:`guidepoint.case.decide_next_case_state`.
 
 OUTPUTS — adapter-layer Protocols every implementation satisfies
 ================================================================
-- ``TwilioSend``    : send one SMS to the customer
+- ``TwilioSend``    : send one SMS to the customer (queued)
 - ``LlmComplete``   : call the LLM with [system, ...history] -> next reply
 - ``HistoryStore``  : persist message history per conversation
 - ``RoutingStore``  : map customer phone -> ``RoutingEntry``
@@ -25,9 +36,11 @@ OUTPUTS — adapter-layer Protocols every implementation satisfies
 LIVE FACTORIES (used by simulator wiring)
 =========================================
 - ``build_twilio_sender(...)``
+- ``build_queued_twilio_sender(...)``
 - ``build_litellm_completer(...)``
 - ``build_json_history_store(...)``
 - ``build_json_routing_store(...)``
+- ``build_sms_message_composer(...)``
 """
 
 from __future__ import annotations
@@ -151,15 +164,9 @@ class RoutingStore(Protocol):
 
 
 # ---------------------------------------------------------------------------
-# Channel session + factories (re-exported from the impl modules)
+# Live factories + transport / composition (re-exported from impl modules)
 # ---------------------------------------------------------------------------
 
-from sms_adapter._call_session import (  # noqa: E402
-    DEFAULT_INACTIVITY_TIMEOUT,
-    SmsCallSession,
-    build_sms_call_manager,
-    build_sms_call_session,
-)
 from sms_adapter._history import build_json_history_store  # noqa: E402
 from sms_adapter._gated_twilio import (  # noqa: E402
     SmsConsentChecker,
@@ -178,6 +185,15 @@ from sms_adapter._optout import (  # noqa: E402
 )
 from sms_adapter._routing import build_json_routing_store  # noqa: E402
 from sms_adapter._twilio import build_twilio_sender  # noqa: E402
+from sms_adapter._composer import (  # noqa: E402
+    ComposedMessage,
+    SmsMessageComposer,
+    build_sms_message_composer,
+)
+from sms_adapter._dispatcher import (  # noqa: E402
+    LiveSmsDispatcher,
+    build_sms_dispatcher,
+)
 
 __all__ = [
     # value objects
@@ -191,11 +207,12 @@ __all__ = [
     "LlmComplete",
     "RoutingStore",
     "TwilioSend",
-    # CallSession implementation (satisfies guidepoint.case.CallSession Protocol)
-    "DEFAULT_INACTIVITY_TIMEOUT",
-    "SmsCallSession",
-    "build_sms_call_manager",
-    "build_sms_call_session",
+    # composition + dispatcher (satisfies guidepoint.case.SmsDispatcher)
+    "ComposedMessage",
+    "LiveSmsDispatcher",
+    "SmsMessageComposer",
+    "build_sms_dispatcher",
+    "build_sms_message_composer",
     # live factories (simulator wiring uses these)
     "build_json_history_store",
     "build_json_routing_store",

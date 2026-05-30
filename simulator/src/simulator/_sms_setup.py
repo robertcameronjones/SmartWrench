@@ -1,28 +1,36 @@
-"""Build the SMS ``CallSession`` (and routing store reference) from env + disk.
+"""Build the SMS dispatcher (and routing store reference) from env + disk.
 
-One job: assemble the live :class:`SmsCallSession` (LiteLLM completer,
-JSON history store, JSON routing store, prompt paths) wired to an
-externally-supplied :class:`TwilioSend` and return it along with the
-routing store. The webhook handler in ``simulator._app`` needs the
-routing store to translate ``phone -> case_id`` for inbound texts.
+Composes the three things the SMS path needs at runtime:
 
-Returns ``(None, None)`` if the SMS env vars aren't set or no sender
-was supplied, so the simulator boots fine for voice-only operators;
-the Fire route surfaces a 503 if the operator picks channel=sms in
+1. :class:`SmsMessageComposer` — the LLM-driven message author. One
+   instance per process, stateless across calls.
+2. :class:`LiveSmsDispatcher` — wraps the composer + the supplied
+   queued sender so the :class:`CaseDriver` can dispatch one outbound
+   SMS reply at a time through the existing
+   :class:`guidepoint.case.SmsDispatcher` Protocol.
+3. The :class:`RoutingStore` — returned alongside so the inbound
+   webhook handler can translate ``phone -> case_id`` for inbound
+   texts before handing them to the driver.
+
+Returns ``(None, None)`` if no queued sender was supplied (SMS
+disabled). The simulator boots fine for voice-only operators; the
+Fire route surfaces a 503 if the operator picks ``channel=sms`` in
 that state.
 
-The :class:`TwilioSend` is supplied by the caller (typically the
-queue-backed sender from :mod:`simulator._outbound_setup`). This
-module no longer constructs the live Twilio sender directly — that
-moved to ``_outbound_setup`` along with the worker that drains the
-outbound queue. Tests can also pass an injected fake sender.
+The queued :class:`TwilioSend` is constructed in
+:mod:`simulator._outbound_setup` and passed in here. This module
+never reaches Twilio directly — keeping the live Twilio client and
+the outbound queue worker out of this file makes the SMS dispatcher
+test setup small (fake LLM + fake queue + in-memory routing).
 
 Required env vars for SMS (already present in ``sms/.env`` +
 ``llm/.env`` from the existing standalone tools):
-- ``OPENROUTER_API_KEY``      (or whatever provider env LiteLLM needs
-                               for the chosen model)
+
+- ``OPENROUTER_API_KEY``  (or whatever provider env LiteLLM needs
+                           for the chosen model)
 
 Optional:
+
 - ``LLM_MODEL``      LiteLLM model string. Defaults to
                      ``openrouter/openai/gpt-oss-20b:free`` (the model
                      the operator already verified works).
@@ -41,13 +49,14 @@ from guidepoint.clock import Clock
 from guidepoint.events import EventBus
 from prompt_composer import PromptPaths
 from sms_adapter import (
+    LiveSmsDispatcher,
     RoutingStore,
-    SmsCallSession,
     TwilioSend,
     build_json_history_store,
     build_json_routing_store,
     build_litellm_completer,
-    build_sms_call_session,
+    build_sms_dispatcher,
+    build_sms_message_composer,
 )
 
 _log = structlog.get_logger(__name__)
@@ -60,16 +69,23 @@ def build_sms_session(
     bus: EventBus[CaseEvent],
     clock: Clock,
     twilio_send: TwilioSend | None,
-) -> tuple[SmsCallSession | None, RoutingStore | None]:
-    """Compose the live :class:`SmsCallSession` + its routing store, or ``(None, None)``.
+) -> tuple[LiveSmsDispatcher | None, RoutingStore | None]:
+    """Compose the live :class:`LiveSmsDispatcher` + routing store.
+
+    Returns ``(dispatcher, routing)`` when SMS is enabled, or
+    ``(None, None)`` when no queued sender was provided. The
+    dispatcher satisfies :class:`guidepoint.case.SmsDispatcher` and
+    is intended to be passed straight into the :class:`CaseDriver`'s
+    ``sms_dispatcher`` constructor argument.
 
     The routing store is returned alongside so the inbound webhook
     handler can translate ``phone -> case_id`` without reaching into
-    the session's internals.
+    the dispatcher's internals; the webhook then calls
+    ``CaseDriver.on_inbound_sms`` with the resolved case id.
 
     Pass ``twilio_send=None`` (or omit at the caller) to disable SMS
-    — the function returns ``(None, None)`` and the Fire route 503s on
-    channel=sms.
+    — the function returns ``(None, None)`` and the Fire route 503s
+    on channel=sms.
     """
     if twilio_send is None:
         _log.warning("simulator.sms.disabled", reason="no twilio_send supplied")
@@ -86,9 +102,6 @@ def build_sms_session(
     history_dir.mkdir(parents=True, exist_ok=True)
     routing_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # ``project_root`` points at the 11Labs/ folder (where the case
-    # repo, fixtures, and master-prompt config live). The SMS spot md
-    # lives in the sibling sms_adapter/ package one level up.
     workspace_root = project_root.parent
     prompt_paths = PromptPaths(
         system=project_root / "config" / "system-prompt.md",
@@ -99,17 +112,16 @@ def build_sms_session(
 
     history = build_json_history_store(root=history_dir)
     routing = build_json_routing_store(path=routing_path)
-    session = build_sms_call_session(
-        twilio_send=twilio_send,
+    composer = build_sms_message_composer(
         llm_complete=build_litellm_completer(model=model, event_log_path=event_log_path),
         history=history,
-        routing=routing,
-        prompt_paths=prompt_paths,
         case_repo=case_repo,
-        bus=bus,
         clock=clock,
+        prompt_paths=prompt_paths,
+        bus=bus,
         event_log_path=event_log_path,
     )
+    dispatcher = build_sms_dispatcher(composer=composer, sender=twilio_send)
     _log.info(
         "simulator.sms.enabled",
         model=model,
@@ -117,7 +129,7 @@ def build_sms_session(
         routing_path=str(routing_path),
         event_log_path=str(event_log_path),
     )
-    return session, routing
+    return dispatcher, routing
 
 
 __all__ = ["build_sms_session"]

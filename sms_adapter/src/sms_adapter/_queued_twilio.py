@@ -1,6 +1,6 @@
 """Queue-backed :class:`TwilioSend` — fire-and-forget bridge to the outbound queue.
 
-The :class:`SmsCallSession` was written assuming a synchronous Twilio
+The old long-running ``SmsCallSession`` was written assuming a synchronous Twilio
 sender that returns a MessageSid. The outbound queue is asynchronous —
 items land in a SQLite table and the :class:`OutboundWorker` drains
 them. This module is the *fire-and-forget* glue between the two:

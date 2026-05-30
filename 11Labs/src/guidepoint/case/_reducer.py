@@ -62,6 +62,7 @@ from guidepoint.case._signals import (
     DealerSlotsListed,
     EndOfBusinessDayReached,
     FinalReminderDue,
+    InboundSmsReceived,
     InitialReminderDue,
     TimerFired,
     VehicleEnteredDealer,
@@ -328,6 +329,9 @@ def decide_next_case_state(
 
     if isinstance(signal, CallEnded):
         return _on_call_ended(case, signal, now=now)
+
+    if isinstance(signal, InboundSmsReceived):
+        return _on_inbound_sms_received(case, signal)
 
     if isinstance(signal, DealerSlotsListed):
         return _on_dealer_slots_listed(case, signal)
@@ -668,6 +672,274 @@ def _on_incomplete_outcome(
             reason="feedback_silence_completes",
         )
     return _ignored(case, "incomplete_unknown_stage")
+
+
+# ---------------------------------------------------------------------------
+# Inbound SMS classification + reducer handler.
+#
+# Every inbound text from the customer arrives here. The reducer maps
+# (state, body) to a decision:
+#
+# - Reminder stages (initial / final) — recognise the three documented
+#   options confirm / reschedule / cancel and route them through the
+#   existing post-booking touchpoint logic. Anything else (including
+#   free text) keeps the case in the same state and triggers a
+#   composed LLM reply via a fresh ``PlaceCall`` action.
+# - Outreach / propose / picked / rescheduling — recognise a numbered
+#   digit pick against ``case.offered_slots``. The Nth+1 option is
+#   "none of those work" → DECLINED. Free text triggers a composed
+#   LLM reply.
+# - Anywhere else (confirming-with-dealer, awaiting-reminders,
+#   showed, awaiting-feedback) — log + ignore.
+# ---------------------------------------------------------------------------
+
+# Customer reply vocabularies for the two post-booking touchpoints. Aligned
+# with the numbered options in ``prompt-post-booking.md``: 1 Confirm,
+# 2 Reschedule, 3 Cancel. Kept here in the reducer (rather than the SMS
+# adapter) so the state machine fully owns the inbound-→-decision mapping.
+_INBOUND_CONFIRMED: frozenset[str] = frozenset(
+    {"1", "CONFIRMED", "CONFIRM", "YES", "Y", "OK", "OKAY", "YEP", "YUP"}
+)
+_INBOUND_RESCHEDULE: frozenset[str] = frozenset(
+    {"2", "RESCHEDULE", "RESCHED", "RESCHEDULED", "RESCHEDULING", "NEW TIME"}
+)
+_INBOUND_CANCEL: frozenset[str] = frozenset(
+    {"3", "CANCEL", "CANCELLED", "CANCELED", "NO", "N"}
+)
+_OUTREACH_CANCEL: frozenset[str] = frozenset({"CANCEL", "CANCELLED", "CANCELED"})
+
+_OUTREACH_STATES: frozenset[CaseState] = frozenset(
+    {
+        CaseState.CREATED,
+        CaseState.CONTACTING_CUSTOMER,
+        CaseState.SLOT_PROPOSED,
+        CaseState.SLOT_PICKED,
+        CaseState.RESCHEDULING,
+    }
+)
+
+
+def _normalize_inbound(body: str) -> str:
+    """Strip + uppercase one SMS body for vocabulary matching."""
+
+    return body.strip().upper()
+
+
+def _classify_post_booking_reply(normalized: str) -> str | None:
+    """Map a normalized inbound body to a post-booking outcome verb.
+
+    Returns one of ``"confirmed"`` / ``"rescheduled"`` / ``"cancelled"``
+    when the text matches one of the documented numbered options, or
+    ``None`` for free text / ambiguity (in which case the reducer
+    falls through to an LLM-composed reply).
+    """
+
+    if normalized in _INBOUND_CONFIRMED:
+        return "confirmed"
+    if normalized in _INBOUND_RESCHEDULE:
+        return "rescheduled"
+    if normalized in _INBOUND_CANCEL:
+        return "cancelled"
+    return None
+
+
+_OutreachDigitKind = Literal["book", "decline", "none"]
+
+
+def _interpret_outreach_digit(body: str, *, case: Case) -> tuple[_OutreachDigitKind, SlotId | None]:
+    """Map a customer's digit-only reply to a slot pick during outreach.
+
+    The SMS opener presents ``offered_slots`` numbered ``1..N`` with
+    ``N+1 = "None of those work"``. A plain-digit reply IS the
+    customer's decision; the LLM's prose acknowledgement of it does
+    not need to be parsed.
+
+    - ``"1".."N"`` → ``("book", SlotId)`` for that index.
+    - ``"N+1"``   → ``("decline", None)`` (none of those work).
+    - anything else (multi-char, non-digit) → ``("none", None)``.
+    """
+
+    cleaned = body.strip()
+    if not cleaned.isdigit():
+        return ("none", None)
+    idx = int(cleaned) - 1
+    n = len(case.offered_slots)
+    if 0 <= idx < n:
+        return ("book", case.offered_slots[idx].id)
+    if idx == n:
+        return ("decline", None)
+    return ("none", None)
+
+
+def _llm_reply_action(case: Case, *, stage: CallStage) -> PlaceCall:
+    """Build the :class:`PlaceCall` action that asks the driver to
+    compose-and-send one LLM-driven reply for the current case.
+
+    No attempt-count increment: this is a turn within the existing
+    conversation, not a fresh dial attempt. The attempt counter only
+    moves on stage transitions and explicit retries.
+    """
+
+    return PlaceCall(
+        case_id=case.case_id,
+        stage=stage,
+        attempt_number=max(case.attempt_count, 1),
+    )
+
+
+def _on_inbound_sms_received(case: Case, signal: InboundSmsReceived) -> CaseDecision:
+    """Route one inbound SMS body into the appropriate state transition.
+
+    The driver has already appended the customer's turn to the SMS
+    history store by the time this runs; the LLM reply (when one is
+    needed) will see it on its next ``HistoryStore.load``.
+    """
+
+    normalized = _normalize_inbound(signal.body)
+
+    # ---- Post-booking reminder stages ------------------------------------
+
+    if case.state == CaseState.INITIAL_REMINDER_SENT:
+        bo = _classify_post_booking_reply(normalized)
+        if bo is not None:
+            decision = _post_booking_touchpoint_outcome(case, bo=bo, stage="initial")
+            if decision is not None:
+                return decision
+        return CaseDecision(
+            next_state=case.state,
+            actions=(
+                _llm_reply_action(case, stage=CallStage.INITIAL_REMINDER),
+                RecordEvent(
+                    case_id=case.case_id,
+                    event="case.initial_reminder.free_text",
+                    detail=_audit_summary(signal),
+                ),
+            ),
+            reason="initial_reminder_free_text_reply",
+        )
+
+    if case.state == CaseState.FINAL_REMINDER_SENT:
+        bo = _classify_post_booking_reply(normalized)
+        if bo is not None:
+            decision = _post_booking_touchpoint_outcome(case, bo=bo, stage="final")
+            if decision is not None:
+                return decision
+        return CaseDecision(
+            next_state=case.state,
+            actions=(
+                _llm_reply_action(case, stage=CallStage.FINAL_REMINDER),
+                RecordEvent(
+                    case_id=case.case_id,
+                    event="case.final_reminder.free_text",
+                    detail=_audit_summary(signal),
+                ),
+            ),
+            reason="final_reminder_free_text_reply",
+        )
+
+    # ---- Outreach (or rescheduling, which is outreach-shaped) -------------
+
+    if case.state in _OUTREACH_STATES:
+        kind, picked = _interpret_outreach_digit(signal.body, case=case)
+        if kind == "book" and picked is not None:
+            display = _resolve_booked_slot_display(case, picked)
+            return CaseDecision(
+                next_state=CaseState.CONFIRMING_WITH_DEALER,
+                actions=(
+                    RequestDealerConfirmation(case_id=case.case_id, slot_id=picked),
+                    _llm_reply_action(case, stage=CallStage.OUTREACH),
+                    RecordEvent(
+                        case_id=case.case_id,
+                        event="case.slot.picked",
+                        detail=(
+                            f"customer picked slot {picked} via SMS; "
+                            "confirming with dealer"
+                        ),
+                    ),
+                ),
+                patch=CasePatch(
+                    booked_slot_id=picked,
+                    booked_slot_display=display or None,
+                ),
+                reason="outreach_booked_via_inbound",
+            )
+        if kind == "decline":
+            return CaseDecision(
+                next_state=CaseState.DECLINED,
+                actions=(
+                    CancelTimer(
+                        case_id=case.case_id, name=TIMER_INITIAL_REMINDER
+                    ),
+                    CancelTimer(case_id=case.case_id, name=TIMER_FINAL_REMINDER),
+                    CancelTimer(case_id=case.case_id, name=TIMER_END_OF_DAY),
+                    RecordEvent(
+                        case_id=case.case_id,
+                        event="case.closed.declined",
+                        detail="customer picked none-of-those-work option via SMS",
+                    ),
+                ),
+                reason="outreach_declined_via_inbound",
+            )
+        # Outreach hard-cancel keyword (CANCEL spelled out, not a digit).
+        if normalized in _OUTREACH_CANCEL:
+            return CaseDecision(
+                next_state=CaseState.DECLINED,
+                actions=(
+                    CancelTimer(
+                        case_id=case.case_id, name=TIMER_INITIAL_REMINDER
+                    ),
+                    CancelTimer(case_id=case.case_id, name=TIMER_FINAL_REMINDER),
+                    CancelTimer(case_id=case.case_id, name=TIMER_END_OF_DAY),
+                    RecordEvent(
+                        case_id=case.case_id,
+                        event="case.closed.declined",
+                        detail=f"customer cancelled during outreach: {normalized}",
+                    ),
+                ),
+                reason="outreach_cancel_keyword",
+            )
+        # Free text: ask the LLM to keep the conversation going.
+        return CaseDecision(
+            next_state=case.state,
+            actions=(
+                _llm_reply_action(case, stage=CallStage.OUTREACH),
+                RecordEvent(
+                    case_id=case.case_id,
+                    event="case.outreach.free_text",
+                    detail=_audit_summary(signal),
+                ),
+            ),
+            reason="outreach_free_text_reply",
+        )
+
+    # ---- Anywhere else (CONFIRMING_WITH_DEALER, reminder-DUE windows,
+    # SHOWED, AWAITING_FEEDBACK) — log + ignore. We don't crash, and we
+    # don't trigger a new LLM round-trip; the customer may text us
+    # mid-flight while we're awaiting an external event.
+
+    return CaseDecision(
+        next_state=case.state,
+        actions=(
+            RecordEvent(
+                case_id=case.case_id,
+                event="case.inbound.unhandled",
+                detail=(
+                    f"inbound SMS arrived in {case.state.value} — "
+                    f"{_audit_summary(signal)}"
+                ),
+            ),
+        ),
+        reason=f"inbound_unhandled_at_{case.state.value}",
+    )
+
+
+def _audit_summary(signal: InboundSmsReceived, *, limit: int = 120) -> str:
+    """Render an inbound signal as a one-line audit detail string."""
+
+    clipped = signal.body.strip().replace("\n", " ")
+    if len(clipped) > limit:
+        clipped = clipped[: limit - 1] + "\u2026"
+    return f"from={signal.from_phone} sid={signal.message_sid} body={clipped!r}"
 
 
 def _on_dealer_slots_listed(case: Case, signal: DealerSlotsListed) -> CaseDecision:

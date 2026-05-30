@@ -96,6 +96,7 @@ from guidepoint.case._models import (
 from guidepoint.case._ports import (
     CallManager,
     DealerSlotPort,
+    SmsDispatcher,
     TimerService,
 )
 from guidepoint.case._reducer import (
@@ -110,6 +111,7 @@ from guidepoint.case._signals import (
     DealerConfirmed,
     DealerRejected,
     DealerSlotsListed,
+    InboundSmsReceived,
     is_case_targeted,
     is_customer_targeted,
     is_vehicle_targeted,
@@ -160,6 +162,7 @@ class CaseDriver:
         case_repo: CaseRepository,
         call_manager: CallManager | None = None,
         call_managers: Mapping[Channel, CallManager] | None = None,
+        sms_dispatcher: SmsDispatcher | None = None,
         dealer_port: DealerSlotPort,
         timer_service: TimerService,
         bus: _CaseEventBus,
@@ -176,6 +179,12 @@ class CaseDriver:
         else:
             assert call_manager is not None
             self._call_managers = {"voice": call_manager}
+        # SMS is *not* a CallManager. It's a turn-by-turn dispatcher
+        # (compose-and-send) hand in hand with the InboundSmsReceived
+        # signal path. The driver routes SMS PlaceCall actions through
+        # this dispatcher instead of CallManager.start when the case's
+        # initial_channel is "sms".
+        self._sms_dispatcher = sms_dispatcher
         self._dealer_port = dealer_port
         self._timer_service = timer_service
         self._bus = bus
@@ -257,6 +266,68 @@ class CaseDriver:
         # The discriminated union is exhaustive — this branch is purely
         # defensive against future signal types that forget a classifier.
         _log.warning("case_driver.signal.unclassified", signal=type(signal).__name__)
+
+    async def on_inbound_sms(
+        self,
+        *,
+        case_id: CaseId,
+        from_phone: str,
+        body: str,
+        message_sid: str,
+    ) -> None:
+        """Webhook entry: record one inbound SMS + fan out the signal.
+
+        The webhook layer has already translated ``from_phone`` into
+        the active ``case_id`` via the routing store. From here:
+
+        1. The SMS dispatcher appends the customer turn to the SMS
+           history store (and tails the SMS event log) so that the
+           next LLM-composed reply sees what the customer actually
+           sent.
+        2. An :class:`InboundSmsReceived` signal is enqueued onto the
+           case's signal queue. The reducer picks it up on the next
+           tick and decides what to do (digit pick → state move,
+           keyword → state move, free text → emit a new ``PlaceCall``
+           for an LLM reply).
+
+        Opt-out (``STOP`` / ``UNSUBSCRIBE``) is NOT routed through
+        here; the webhook short-circuits to
+        :class:`CustomerOptedOut` for consent updates that must run
+        even when no case is active.
+        """
+
+        if self._sms_dispatcher is None:
+            _log.error(
+                "sms_dispatcher.missing_on_inbound",
+                case_id=case_id,
+                from_phone=from_phone,
+                message_sid=message_sid,
+            )
+            return
+        try:
+            await self._sms_dispatcher.record_inbound(
+                case_id=case_id,
+                from_phone=from_phone,
+                body=body,
+                message_sid=message_sid,
+            )
+        except Exception as exc:
+            _log.exception(
+                "sms_dispatcher.record_inbound.failed",
+                case_id=case_id,
+                from_phone=from_phone,
+                message_sid=message_sid,
+                error=str(exc),
+            )
+        await self.on_signal(
+            InboundSmsReceived(
+                timestamp=self._clock.now(),
+                case_id=case_id,
+                from_phone=from_phone,
+                body=body,
+                message_sid=message_sid,
+            )
+        )
 
     async def recover_in_flight(self) -> int:
         """Spawn a case loop for every non-terminal case in the repo.
@@ -488,11 +559,29 @@ class CaseDriver:
         task.add_done_callback(self._io_tasks.discard)
 
     async def _run_place_call(self, case: Case, action: PlaceCall) -> None:
-        """Run a CallManager.start() and feed the outcome back as CallEnded."""
+        """Dispatch one PlaceCall.
+
+        Routing depends on the case's ``initial_channel``:
+
+        - ``"sms"`` — compose one assistant reply via the injected
+          :class:`SmsDispatcher` and hand it to the outbound queue.
+          No ``CallEnded`` signal is emitted; SMS is turn-by-turn and
+          the conversation continues via :class:`InboundSmsReceived`
+          when the customer replies.
+        - everything else (voice today) — call the channel's
+          :class:`CallManager` ``start`` method, which runs the call
+          until terminal and produces a :class:`CallOutcome`; the
+          driver wraps it into ``CallEnded`` for the reducer.
+        """
 
         fresh = self._safe_get(case.case_id)
         if fresh is None:
             return
+
+        if fresh.initial_channel == "sms":
+            await self._run_sms_outbound(fresh, action)
+            return
+
         mgr = self._call_managers.get(fresh.initial_channel)
         if mgr is None:
             _log.error(
@@ -546,6 +635,38 @@ class CaseDriver:
                 outcome=outcome,
             )
         )
+
+    async def _run_sms_outbound(self, case: Case, action: PlaceCall) -> None:
+        """SMS path for PlaceCall — compose + send, then return.
+
+        No long-running session, no terminal outcome to wait for. The
+        reducer drives the next state via :class:`InboundSmsReceived`
+        when the customer replies, or via the reminder timers / EoD /
+        geofence signals when the wall clock advances.
+        """
+
+        if self._sms_dispatcher is None:
+            _log.error(
+                "sms_dispatcher.missing",
+                case_id=case.case_id,
+                stage=action.stage.value,
+                attempt_number=action.attempt_number,
+            )
+            return
+        try:
+            await self._sms_dispatcher.dispatch_outbound(
+                case_id=case.case_id,
+                to_phone=case.customer.phone,
+                stage=action.stage,
+            )
+        except Exception as exc:
+            _log.exception(
+                "sms_dispatcher.dispatch_outbound.failed",
+                case_id=case.case_id,
+                stage=action.stage.value,
+                attempt_number=action.attempt_number,
+                error=str(exc),
+            )
 
     async def _run_request_slots(self, case: Case) -> None:
         """Run DealerSlotPort.list_slots() and feed DealerSlotsListed back."""

@@ -71,14 +71,14 @@ class CallManager(Protocol):
 
     Implementations:
 
-    - ``VoiceCallManager`` (Phase 5; today still the v1 ``_LiveCallSession``)
+    - ``VoiceCallManager`` (today still the v1 ``_LiveCallSession``)
       — ElevenLabs outbound twilio call, polls until terminal, returns
       the rolled-up ``CallOutcome``.
 
-    - ``SmsCallManager`` (Phase 5; today the v1 ``_SmsCallSession`` in
-      ``sms_adapter``) — orchestrates the SMS conversation, owns its own
-      inbound queue and turn loop, returns when the conversation reaches
-      a business decision or times out.
+    SMS is **not** a CallManager — see :class:`SmsDispatcher` below.
+    SMS is turn-by-turn (one outbound text per ``PlaceCall`` action,
+    one inbound text per :class:`InboundSmsReceived` signal) and does
+    not match the "place one call, get one rolled-up outcome" shape.
 
     The driver passes the *case snapshot at the time of dispatch*. The
     CallManager must not assume the case won't change while the call is
@@ -107,6 +107,62 @@ class CallManager(Protocol):
             A ``CallOutcome``. The driver will wrap this into a
             ``CallEnded`` signal and re-enqueue onto the case's queue,
             where the reducer picks it up on the next tick.
+        """
+        ...
+
+
+class SmsDispatcher(Protocol):
+    """Compose-and-send one outbound SMS reply for a case.
+
+    Replaces the v1 ``CallManager`` path for SMS. SMS is turn-by-turn
+    (one outbound text per ``PlaceCall`` action), not a long-running
+    "call" with a single rolled-up outcome, so this Protocol returns
+    nothing structural — only the queued ``item_id`` for the audit
+    trail. The real Twilio MessageSid arrives back as a separate
+    :class:`OutboundDispatched` signal once the worker dispatches.
+
+    The driver also delegates the inbound side to this Protocol: it
+    asks the dispatcher to record the customer's turn (history +
+    audit log) before handing the inbound off to the reducer. Keeping
+    the call shape inside one Protocol means the driver never imports
+    the SMS adapter directly — sms_adapter implements this Protocol
+    and the simulator (or tests) inject the implementation.
+    """
+
+    async def dispatch_outbound(
+        self,
+        *,
+        case_id: CaseId,
+        to_phone: str,
+        stage: CallStage,
+    ) -> str:
+        """Compose one assistant reply for ``case_id`` at ``stage`` and
+        hand it to the outbound queue.
+
+        Returns the queue's ``item_id`` so the driver can correlate the
+        eventual :class:`OutboundDispatched` signal back to this
+        dispatch (and so callers can audit-link the call). Implementations
+        should append the assistant turn to the SMS history and emit a
+        ``sms.outbound`` audit event once the queue accepts the item.
+        """
+        ...
+
+    async def record_inbound(
+        self,
+        *,
+        case_id: CaseId,
+        from_phone: str,
+        body: str,
+        message_sid: str,
+    ) -> None:
+        """Persist one inbound customer turn before reducer classification.
+
+        Called by the driver as soon as the webhook resolves
+        ``from_phone -> case_id``, before the
+        :class:`InboundSmsReceived` signal is fanned out to the
+        reducer. Doing the append here keeps the LLM's view of the
+        conversation (when the reducer eventually triggers a reply
+        turn) consistent with what the customer actually saw.
         """
         ...
 
@@ -205,5 +261,6 @@ __all__ = [
     "GeofenceEventKind",
     "GeofencePort",
     "GeofenceSubscription",
+    "SmsDispatcher",
     "TimerService",
 ]

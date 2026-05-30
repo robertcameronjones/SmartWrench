@@ -24,10 +24,11 @@ Per the operator's mental model (2026-05-10):
   service type + summary and presses Fire. The trigger is synthesized
   on the server from the saved master data + the form input. It has
   no durable existence and no picker.
-- Every Fire goes through ``CaseManager.start`` regardless of channel.
-  The manager picks the right ``CallSession`` (voice → ElevenLabs,
-  sms → ``SmsCallSession``) by ``trigger.channel_preference``. The
-  route layer never imports any ``CallSession`` directly.
+- Every Fire goes through ``CaseDriver.fire`` regardless of channel.
+  The driver picks the right transport by the case's
+  ``initial_channel``: voice → ElevenLabs ``CallManager``, sms →
+  :class:`SmsDispatcher` (compose + send + outbound queue). The route
+  layer never imports either directly.
 """
 
 from __future__ import annotations

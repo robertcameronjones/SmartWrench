@@ -196,6 +196,33 @@ class VehicleExitedDealer(BaseModel):
     vehicle_vin: VehicleVin
 
 
+class InboundSmsReceived(BaseModel):
+    """One inbound SMS just arrived for an active case.
+
+    The adapter resolved ``from_phone -> case_id`` via the routing
+    store and republished the raw text body onto the case driver's
+    signal queue. From here on the reducer owns the interpretation:
+    digit picks at outreach, confirm / reschedule / cancel at the
+    reminder stages, and free-text replies that need an LLM-composed
+    answer.
+
+    Opt-out (``STOP`` / ``UNSUBSCRIBE``) is **not** routed through
+    this signal — the webhook handler short-circuits to
+    :class:`CustomerOptedOut` directly so consent updates always run
+    even if no case is active.
+    """
+
+    model_config = _frozen_strict()
+
+    signal_type: Literal["inbound_sms_received"] = "inbound_sms_received"
+    timestamp: UtcDatetime
+    source: EventSource = "sms"
+    case_id: CaseId
+    from_phone: str = Field(min_length=1)
+    body: str
+    message_sid: str = ""
+
+
 class CustomerOptedOut(BaseModel):
     """Customer sent STOP / UNSUBSCRIBE / similar.
 
@@ -357,6 +384,7 @@ CaseSignal = Annotated[
     | DealerSlotsListed
     | DealerConfirmed
     | DealerRejected
+    | InboundSmsReceived
     | InitialReminderDue
     | FinalReminderDue
     | TimerFired
@@ -390,6 +418,7 @@ _CASE_TARGETED_TYPES: tuple[type[BaseModel], ...] = (
     DealerSlotsListed,
     DealerConfirmed,
     DealerRejected,
+    InboundSmsReceived,
     InitialReminderDue,
     FinalReminderDue,
     TimerFired,
@@ -446,6 +475,7 @@ __all__ = [
     "DealerSlotsListed",
     "EndOfBusinessDayReached",
     "FinalReminderDue",
+    "InboundSmsReceived",
     "InitialReminderDue",
     "OutboundDispatched",
     "TimerFired",
