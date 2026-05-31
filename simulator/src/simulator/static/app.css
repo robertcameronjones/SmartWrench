@@ -567,26 +567,32 @@ button, input, select, textarea { font: inherit; color: inherit; }
   background: var(--bg);
   min-height: 0;
 }
+/* Two-line layout so the detail always spans the full panel width and
+   never gets crushed by the fixed meta columns (which was wrapping the
+   SMS body to one character per line in the narrow log panel). Line 1
+   is the meta strip (time, corr, event, state, source); line 2 is the
+   full-width detail. */
 .log-row {
   display: grid;
-  grid-template-columns: 76px 100px 150px 130px 1fr auto;
-  gap: 10px;
-  padding: 3px 4px;
+  grid-template-columns: auto auto 1fr auto auto;
+  grid-template-areas:
+    "time corr event state source"
+    "detail detail detail detail detail";
+  gap: 2px 10px;
+  padding: 4px;
   border-radius: 3px;
-  align-items: start;
+  align-items: baseline;
 }
 .log-row:hover { background: var(--bg-elev); }
-.log-time  { color: var(--text-mute); white-space: nowrap; }
-.log-corr  { color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.log-event { color: var(--accent); font-weight: 500; white-space: nowrap; }
+.log-time  { grid-area: time; color: var(--text-mute); white-space: nowrap; }
+.log-corr  { grid-area: corr; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 110px; }
+.log-event { grid-area: event; color: var(--accent); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .log-state {
+  grid-area: state;
   color: var(--text-dim);
   font-family: var(--mono);
   font-size: 10px;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  align-self: center;
 }
 .log-state:not(:empty) {
   color: var(--text);
@@ -596,6 +602,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
   padding: 0 5px;
 }
 .log-detail{
+  grid-area: detail;
   color: var(--text);
   white-space: pre-wrap;
   word-break: break-word;
@@ -666,7 +673,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
   margin-top: 8px;
 }
 .log-source {
+  grid-area: source;
   color: var(--text-mute);
   font-size: 10px;
-  margin-left: 8px;
+  white-space: nowrap;
 }
