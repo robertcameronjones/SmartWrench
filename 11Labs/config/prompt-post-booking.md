@@ -44,9 +44,10 @@ Pick exactly the branch whose label matches ``{{case_state}}``:
   > {{booked_slot_display}}. Reply **1** to confirm, **2** to reschedule,
   > or **3** to cancel."
 
-- Any other ``{{case_state}}`` value → reply EXACTLY:
+- Any other ``{{case_state}}`` value → reply EXACTLY this, echoing the
+  literal value you were given:
 
-  > "Got it — the system isn't expecting input from me right now."
+  > "State not understood. You sent me {{case_state}}."
 
   Do not invent a message. Do not re-open outreach. Do not produce a
   goodbye pleasantry; that hides bugs from operators.
