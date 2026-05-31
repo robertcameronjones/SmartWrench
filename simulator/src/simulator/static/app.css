@@ -122,6 +122,12 @@ button, input, select, textarea { font: inherit; color: inherit; }
   min-height: 0;
   overflow: hidden;
 }
+/* The bare [hidden] attribute is display:none in the UA sheet, but the
+   .panel rule above (a class) overrides it, so a `hidden` panel would
+   still render. Restore the intent: a hidden panel takes no space.
+   Without this the case-controls panel shows before any case is fired
+   and steals the height the trigger panel needs for its Fire button. */
+.panel[hidden] { display: none; }
 .panel-head {
   display: flex;
   align-items: center;
@@ -422,7 +428,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
   background: var(--bg-elev-2);
   color: var(--text);
 }
-/* idle / pre-fire */
+/* pre-fire / no active case */
+.case-state-value[data-state="none"],
 .case-state-value[data-state="idle"],
 .case-state-value[data-state="firing"] { color: var(--text-mute); }
 /* terminal states */

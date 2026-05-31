@@ -456,12 +456,18 @@ function setCaseState(s) {
   $("#status-wf-text").textContent = s;
   $("#status-wf-dot").dataset.state = s;
   // Mirror onto the case-controls readout that sits beside the
-  // state-event buttons, so the operator sees the state right where
-  // they fire signals.
+  // state-event buttons. Only real case states (those reach us once a
+  // case exists) are shown; before a case is fired there is no case
+  // state, so the readout reads "no case" rather than inventing one.
   const readout = $("#case-state-value");
   if (readout) {
-    readout.textContent = s;
-    readout.dataset.state = s;
+    if (state.activeCaseId) {
+      readout.textContent = s;
+      readout.dataset.state = s;
+    } else {
+      readout.textContent = "no case";
+      readout.dataset.state = "none";
+    }
   }
 }
 
