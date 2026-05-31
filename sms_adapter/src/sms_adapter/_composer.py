@@ -63,12 +63,16 @@ _log = structlog.get_logger(__name__)
 class ComposedMessage:
     """The output of one :meth:`SmsMessageComposer.compose` call.
 
-    Just the text body. Carried as a small dataclass rather than a bare
-    string so future fields (token usage, prompt id, etc.) can be added
-    without changing the call signature.
+    ``body`` is the assistant reply to send. ``system_prompt`` is the
+    fully-rendered system prompt that was handed to the LLM for this
+    turn (placeholders filled, including the literal ``{{case_state}}``
+    value). The dispatcher surfaces it on the case audit bus so the
+    verbose simulator log shows exactly what the model was asked —
+    no inferring the prompt from a downstream state stamp.
     """
 
     body: str
+    system_prompt: str = ""
 
 
 @final
@@ -142,7 +146,7 @@ class SmsMessageComposer:
                 ),
             )
         body = self._llm_complete(system=rendered.text, history=history)
-        return ComposedMessage(body=body)
+        return ComposedMessage(body=body, system_prompt=rendered.text)
 
     # -- Helpers for the driver --------------------------------------------
 

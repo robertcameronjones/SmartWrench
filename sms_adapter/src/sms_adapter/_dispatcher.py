@@ -115,6 +115,18 @@ class LiveSmsDispatcher(SmsDispatcher):
             self._composer.compose, case_id=case_id, stage=stage
         )
         body = composed.body
+        # Surface the EXACT prompt we handed the LLM into the live audit
+        # bus (→ the verbose simulator log). This is the only place the
+        # rendered system prompt — with the literal {{case_state}} value
+        # filled in — is visible without reading the on-disk sms.log.
+        # Emitted before the send so a bad reply can be diagnosed against
+        # the prompt that produced it.
+        await self._composer.emit_event(
+            case_id=case_id,
+            event="sms.llm_prompt",
+            level="debug",
+            detail=f"stage={stage.value} | system prompt sent to LLM:\n{composed.system_prompt}",
+        )
         item_id = await asyncio.to_thread(
             self._sender, case_id=case_id, to=to_phone, body=body
         )
