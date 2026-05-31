@@ -124,10 +124,31 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 /* The bare [hidden] attribute is display:none in the UA sheet, but the
    .panel rule above (a class) overrides it, so a `hidden` panel would
-   still render. Restore the intent: a hidden panel takes no space.
-   Without this the case-controls panel shows before any case is fired
-   and steals the height the trigger panel needs for its Fire button. */
+   still render. Keep the intent honest for any panel that uses it. */
 .panel[hidden] { display: none; }
+
+/* Collapsible right-side panels — same affordance as the left-hand
+   master-data <details> blocks. The summary IS the panel head; the
+   body collapses away so the operator can reclaim vertical space (e.g.
+   collapse Case controls to give the Trigger panel room for Fire). */
+.panel-fold { display: flex; flex-direction: column; min-height: 0; }
+.panel-fold > summary.panel-head {
+  cursor: pointer;
+  list-style: none;
+}
+.panel-fold > summary.panel-head::-webkit-details-marker { display: none; }
+.panel-fold > summary.panel-head::after {
+  content: "\25B8"; /* ▸ collapsed */
+  margin-left: auto;
+  color: var(--text-mute);
+  font-size: 10px;
+}
+.panel-fold[open] > summary.panel-head::after { content: "\25BE"; } /* ▾ open */
+.panel-fold-body {
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
 .panel-head {
   display: flex;
   align-items: center;

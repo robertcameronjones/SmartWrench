@@ -118,10 +118,12 @@
 
     <!-- ================== RIGHT TOP: TRIGGER (compose + fire) ================== -->
     <section class="panel trigger-panel">
-      <div class="panel-head">
+      <details open class="panel-fold">
+      <summary class="panel-head">
         <h2>Trigger</h2>
         <span class="case-id-pill" id="active-case-pill">no case</span>
-      </div>
+      </summary>
+      <div class="panel-fold-body">
 
       <form id="trigger-form" class="trigger-form" autocomplete="off">
         <label class="trigger-field">
@@ -177,6 +179,8 @@
           <div class="status-value" id="status-last">--</div>
         </div>
       </div>
+      </div>
+      </details>
     </section>
 
     {% include "_case_panel.html" %}

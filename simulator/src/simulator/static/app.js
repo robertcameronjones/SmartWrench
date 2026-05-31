@@ -302,6 +302,12 @@ function lockChannelPicker() {
 function showCaseControls() {
   const panel = $("#case-controls-panel");
   if (panel) panel.hidden = false;
+  // Auto-expand the collapsible Case controls fold once a case exists,
+  // so the operator sees the live controls without a manual click. They
+  // can still collapse it to reclaim space (it starts collapsed before
+  // any case is fired so the Trigger panel's Fire button has room).
+  const fold = $("#case-controls-fold");
+  if (fold) fold.open = true;
   paintTimeSliders();
 }
 

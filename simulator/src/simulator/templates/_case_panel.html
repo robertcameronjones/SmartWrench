@@ -1,12 +1,14 @@
-<section class="panel controls-panel" id="case-controls-panel" hidden>
-  <div class="panel-head">
+<section class="panel controls-panel" id="case-controls-panel">
+  <details class="panel-fold" id="case-controls-fold">
+  <summary class="panel-head">
     <h2>Case controls</h2>
     <span class="case-state-readout" id="case-state-readout" title="Current case state">
       <span class="case-state-label">state</span>
       <span class="case-state-value" id="case-state-value" data-state="none">no case</span>
     </span>
     <span class="badge badge-optout" id="optout-badge" hidden>SMS opted out</span>
-  </div>
+  </summary>
+  <div class="panel-fold-body">
 
   <p class="hint controls-hint">
     World gates and lifecycle shortcuts for the active case. Buttons appear
@@ -55,4 +57,6 @@
       </div>
     </div>
   </div>
+  </div>
+  </details>
 </section>
