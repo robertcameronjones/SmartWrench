@@ -44,8 +44,9 @@ Pick exactly the branch whose label matches ``{{case_state}}``:
   > {{booked_slot_display}}. Reply **1** to confirm, **2** to reschedule,
   > or **3** to cancel."
 
-- Any other ``{{case_state}}`` value → reply EXACTLY this, echoing the
-  literal value you were given:
+- If it matches neither ``initial_reminder_sent`` nor
+  ``final_reminder_sent`` above → reply EXACTLY this, echoing the literal
+  value you were given:
 
   > "State not understood. You sent me {{case_state}}."
 
