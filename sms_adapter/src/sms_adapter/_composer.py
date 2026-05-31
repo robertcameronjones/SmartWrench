@@ -242,6 +242,7 @@ class SmsMessageComposer:
             level=level,  # type: ignore[arg-type]
             event=event,
             detail=detail,
+            state=case.state,
         )
         self._case_repo.append_event(case_id, evt)
         await self._bus.publish(evt)

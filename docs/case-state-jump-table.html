@@ -224,6 +224,22 @@
       <td class="actions">none <span class="muted">(placeholder; no v2 code emits this generic event)</span></td>
       <td class="reason">ignored:timer_unhandled:{name}</td>
     </tr>
+    <tr class="cross">
+      <td><em>any non-terminal</em></td>
+      <td class="event"><code>OutboundDispatched(item_id, twilio_sid, to_phone)</code></td>
+      <td class="guard"><span class="dash">—</span></td>
+      <td class="next"><em>unchanged</em></td>
+      <td class="actions"><code>RecordEvent("case.outbound.dispatched", detail="to=… sid=… item=…")</code> <span class="muted">(audit-only push from the outbound queue worker; never drives a transition)</span></td>
+      <td class="reason">outbound_dispatched</td>
+    </tr>
+    <tr class="cross">
+      <td><em>any non-terminal not listed in the per-state blocks below</em></td>
+      <td class="event"><code>InboundSmsReceived(from_phone, body, message_sid)</code></td>
+      <td class="guard"><span class="dash">—</span></td>
+      <td class="next"><em>unchanged</em></td>
+      <td class="actions"><code>RecordEvent("case.inbound.unhandled", detail="inbound SMS arrived in {state} — …")</code> <span class="muted">(no LLM round-trip; the customer texted while we're awaiting an external event)</span></td>
+      <td class="reason">inbound_unhandled_at_{state}</td>
+    </tr>
     <tr class="cross terminal">
       <td><em>any terminal</em></td>
       <td class="event"><em>anything</em></td>
@@ -243,6 +259,21 @@
   <code>CallEnded.outcome.business_outcome == "opted_out"</code>; it routes
   via the same universal opt-out path as the cross-cutting
   <code>CustomerOptedOut</code> signal.
+</p>
+<p class="source">
+  <strong>Voice vs SMS customer signals.</strong> Voice raises one
+  <code>CallEnded</code> per dialed call carrying a <code>business_outcome</code>
+  (<code>booked</code>, <code>declined</code>, <code>confirmed</code>,
+  <code>cancelled</code>, <code>rescheduled</code>, <code>opted_out</code>,
+  or inconclusive). SMS is turn-driven: each customer text arrives as
+  <code>InboundSmsReceived(from_phone, body, message_sid)</code>, and the
+  reducer classifies the body into either (a) a vocabulary-matched
+  business outcome — confirm / reschedule / cancel for reminders, digit
+  pick / decline / cancel keyword for outreach — that routes through the
+  same logic the voice path uses, or (b) free text, which keeps the case
+  in the same state and emits a <code>PlaceCall(stage=…)</code> so the
+  SMS dispatcher composes one LLM reply. SMS has no
+  <code>incomplete_retry</code> path; the queue/worker is single-shot.
 </p>
 
 <table>
@@ -320,6 +351,38 @@
       <td class="actions"><span class="muted">universal opt-out path (see cross-cutting rules)</span></td>
       <td class="reason">opt_out</td>
     </tr>
+    <tr>
+      <td>CONTACTING_CUSTOMER</td>
+      <td class="event"><code>InboundSmsReceived(body)</code></td>
+      <td class="guard"><code>body</code> is a digit in <code>1..N</code> where <code>N=len(offered_slots)</code></td>
+      <td class="next">CONFIRMING_WITH_DEALER</td>
+      <td class="actions"><code>RequestDealerConfirmation(slot_id=X)</code> + <code>PlaceCall(stage=OUTREACH, attempt_number=max(attempt_count,1))</code> <span class="muted">(LLM ack to the customer)</span> + <code>RecordEvent("case.slot.picked", detail="customer picked slot X via SMS; confirming with dealer")</code> + <code>patch(booked_slot_id=X, booked_slot_display=...)</code></td>
+      <td class="reason">outreach_booked_via_inbound</td>
+    </tr>
+    <tr>
+      <td>CONTACTING_CUSTOMER</td>
+      <td class="event"><code>InboundSmsReceived(body)</code></td>
+      <td class="guard"><code>body == str(N+1)</code> <span class="muted">("none of those work")</span></td>
+      <td class="next terminal">DECLINED</td>
+      <td class="actions"><code>CancelTimer(initial_reminder)</code> + <code>CancelTimer(final_reminder)</code> + <code>CancelTimer(end_of_business_day)</code> + <code>RecordEvent("case.closed.declined", detail="customer picked none-of-those-work option via SMS")</code></td>
+      <td class="reason">outreach_declined_via_inbound</td>
+    </tr>
+    <tr>
+      <td>CONTACTING_CUSTOMER</td>
+      <td class="event"><code>InboundSmsReceived(body)</code></td>
+      <td class="guard"><code>body.upper() ∈ {"CANCEL","CANCELLED","CANCELED"}</code></td>
+      <td class="next terminal">DECLINED</td>
+      <td class="actions"><code>CancelTimer(initial_reminder)</code> + <code>CancelTimer(final_reminder)</code> + <code>CancelTimer(end_of_business_day)</code> + <code>RecordEvent("case.closed.declined", detail="customer cancelled during outreach: {body}")</code></td>
+      <td class="reason">outreach_cancel_keyword</td>
+    </tr>
+    <tr>
+      <td>CONTACTING_CUSTOMER</td>
+      <td class="event"><code>InboundSmsReceived(body)</code></td>
+      <td class="guard">any other body <span class="muted">(free text, or a digit outside <code>1..N+1</code>)</span></td>
+      <td class="next">CONTACTING_CUSTOMER <span class="muted">(no transition)</span></td>
+      <td class="actions"><code>PlaceCall(stage=OUTREACH, attempt_number=max(attempt_count,1))</code> <span class="muted">(LLM-composed reply)</span> + <code>RecordEvent("case.outreach.free_text", detail=clipped body)</code></td>
+      <td class="reason">outreach_free_text_reply</td>
+    </tr>
 
     <!-- CONFIRMING_WITH_DEALER ============================================= -->
     <tr class="state-head"><td colspan="6">CONFIRMING_WITH_DEALER</td></tr>
@@ -379,35 +442,43 @@
     <tr class="state-head"><td colspan="6">INITIAL_REMINDER_SENT</td></tr>
     <tr>
       <td>INITIAL_REMINDER_SENT</td>
-      <td class="event"><code>CallEnded(outcome.business_outcome="confirmed")</code></td>
-      <td class="guard"><span class="dash">—</span></td>
+      <td class="event"><code>CallEnded(outcome.business_outcome="confirmed")</code> <span class="muted">— voice path</span> <br><code>InboundSmsReceived(body)</code> <span class="muted">— SMS path</span></td>
+      <td class="guard">SMS: <code>body.upper() ∈ {"1","YES","Y","OK","OKAY","YEP","YUP","CONFIRM","CONFIRMED"}</code></td>
       <td class="next">INITIAL_REMINDER_SENT <span class="muted">(no-op transition; logged)</span></td>
-      <td class="actions"><code>RecordEvent("case.initial_reminder.confirmed")</code></td>
+      <td class="actions"><code>RecordEvent("case.initial_reminder.confirmed")</code> <span class="muted">(no LLM reply emitted from this branch — confirmation is silent acknowledgement; final-reminder timer is still armed)</span></td>
       <td class="reason">initial_reminder_confirmed</td>
     </tr>
     <tr>
       <td>INITIAL_REMINDER_SENT</td>
-      <td class="event"><code>CallEnded(outcome.business_outcome="cancelled")</code></td>
-      <td class="guard"><span class="dash">—</span></td>
+      <td class="event"><code>CallEnded(outcome.business_outcome="cancelled")</code> <span class="muted">— voice path</span> <br><code>InboundSmsReceived(body)</code> <span class="muted">— SMS path</span></td>
+      <td class="guard">SMS: <code>body.upper() ∈ {"3","NO","N","CANCEL","CANCELLED","CANCELED"}</code></td>
       <td class="next terminal">CANCELLED</td>
-      <td class="actions"><code>CancelTimer(final_reminder)</code> + <code>CancelTimer(end_of_business_day)</code> + <code>RecordEvent("case.closed.cancelled")</code></td>
+      <td class="actions"><code>CancelTimer(final_reminder)</code> + <code>CancelTimer(end_of_business_day)</code> + <code>RecordEvent("case.closed.cancelled", detail="customer cancelled at initial_reminder")</code></td>
       <td class="reason">initial_reminder_cancelled</td>
     </tr>
     <tr>
       <td>INITIAL_REMINDER_SENT</td>
-      <td class="event"><code>CallEnded(outcome.business_outcome="rescheduled")</code></td>
-      <td class="guard"><code>reschedule_count &lt; 1</code></td>
+      <td class="event"><code>CallEnded(outcome.business_outcome="rescheduled")</code> <span class="muted">— voice path</span> <br><code>InboundSmsReceived(body)</code> <span class="muted">— SMS path</span></td>
+      <td class="guard">SMS: <code>body.upper() ∈ {"2","RESCHEDULE","RESCHED","RESCHEDULED","RESCHEDULING","NEW TIME"}</code><br>and <code>reschedule_count &lt; 1</code></td>
       <td class="next">RESCHEDULING</td>
       <td class="actions"><code>CancelTimer(final_reminder)</code> + <code>CancelTimer(end_of_business_day)</code> + <code>RequestDealerSlots</code> + <code>RecordEvent("case.initial_reminder.rescheduling")</code> + <code>patch.increment_reschedule_count</code></td>
       <td class="reason">initial_reminder_rescheduling</td>
     </tr>
     <tr>
       <td>INITIAL_REMINDER_SENT</td>
-      <td class="event"><code>CallEnded(outcome.business_outcome="rescheduled")</code></td>
-      <td class="guard"><code>reschedule_count == 1</code></td>
+      <td class="event"><code>CallEnded(outcome.business_outcome="rescheduled")</code> <span class="muted">— voice path</span> <br><code>InboundSmsReceived(body)</code> <span class="muted">— SMS path</span></td>
+      <td class="guard">same as above, but <code>reschedule_count == 1</code></td>
       <td class="next terminal">RESCHEDULE_FAILED</td>
       <td class="actions"><code>CancelTimer(final_reminder)</code> + <code>CancelTimer(end_of_business_day)</code> + <code>RecordEvent("case.closed.reschedule_failed", level=warn)</code></td>
       <td class="reason">reschedule_one_shot_exhausted</td>
+    </tr>
+    <tr>
+      <td>INITIAL_REMINDER_SENT</td>
+      <td class="event"><code>InboundSmsReceived(body)</code> <span class="muted">— SMS-only</span></td>
+      <td class="guard">body does not match any of the confirm / reschedule / cancel vocabularies above</td>
+      <td class="next">INITIAL_REMINDER_SENT <span class="muted">(no transition)</span></td>
+      <td class="actions"><code>PlaceCall(stage=INITIAL_REMINDER, attempt_number=max(attempt_count,1))</code> <span class="muted">(LLM-composed reply)</span> + <code>RecordEvent("case.initial_reminder.free_text", detail=clipped body)</code></td>
+      <td class="reason">initial_reminder_free_text_reply</td>
     </tr>
     <tr>
       <td>INITIAL_REMINDER_SENT</td>
@@ -500,6 +571,38 @@
       <td class="actions"><code>RecordEvent("case.closed.abandoned", level=warn)</code></td>
       <td class="reason">outreach_abandoned</td>
     </tr>
+    <tr>
+      <td>RESCHEDULING</td>
+      <td class="event"><code>InboundSmsReceived(body)</code></td>
+      <td class="guard"><code>body</code> is a digit in <code>1..N</code> where <code>N=len(offered_slots)</code></td>
+      <td class="next">CONFIRMING_WITH_DEALER</td>
+      <td class="actions"><code>RequestDealerConfirmation(slot_id=X)</code> + <code>PlaceCall(stage=OUTREACH, attempt_number=max(attempt_count,1))</code> <span class="muted">(LLM ack)</span> + <code>RecordEvent("case.slot.picked")</code> + <code>patch(booked_slot_id=X, booked_slot_display=...)</code></td>
+      <td class="reason">outreach_booked_via_inbound</td>
+    </tr>
+    <tr>
+      <td>RESCHEDULING</td>
+      <td class="event"><code>InboundSmsReceived(body)</code></td>
+      <td class="guard"><code>body == str(N+1)</code> <span class="muted">("none of those work")</span></td>
+      <td class="next terminal">DECLINED</td>
+      <td class="actions"><code>CancelTimer(initial_reminder)</code> + <code>CancelTimer(final_reminder)</code> + <code>CancelTimer(end_of_business_day)</code> + <code>RecordEvent("case.closed.declined")</code></td>
+      <td class="reason">outreach_declined_via_inbound</td>
+    </tr>
+    <tr>
+      <td>RESCHEDULING</td>
+      <td class="event"><code>InboundSmsReceived(body)</code></td>
+      <td class="guard"><code>body.upper() ∈ {"CANCEL","CANCELLED","CANCELED"}</code></td>
+      <td class="next terminal">DECLINED</td>
+      <td class="actions"><code>CancelTimer(initial_reminder)</code> + <code>CancelTimer(final_reminder)</code> + <code>CancelTimer(end_of_business_day)</code> + <code>RecordEvent("case.closed.declined")</code></td>
+      <td class="reason">outreach_cancel_keyword</td>
+    </tr>
+    <tr>
+      <td>RESCHEDULING</td>
+      <td class="event"><code>InboundSmsReceived(body)</code></td>
+      <td class="guard">any other body</td>
+      <td class="next">RESCHEDULING <span class="muted">(no transition)</span></td>
+      <td class="actions"><code>PlaceCall(stage=OUTREACH, attempt_number=max(attempt_count,1))</code> + <code>RecordEvent("case.outreach.free_text")</code></td>
+      <td class="reason">outreach_free_text_reply</td>
+    </tr>
 
     <!-- FINAL_REMINDER_DUE ================================================= -->
     <tr class="state-head"><td colspan="6">FINAL_REMINDER_DUE</td></tr>
@@ -524,35 +627,43 @@
     <tr class="state-head"><td colspan="6">FINAL_REMINDER_SENT</td></tr>
     <tr>
       <td>FINAL_REMINDER_SENT</td>
-      <td class="event"><code>CallEnded(outcome.business_outcome="confirmed")</code></td>
-      <td class="guard"><span class="dash">—</span></td>
+      <td class="event"><code>CallEnded(outcome.business_outcome="confirmed")</code> <span class="muted">— voice</span> <br><code>InboundSmsReceived(body)</code> <span class="muted">— SMS</span></td>
+      <td class="guard">SMS: <code>body.upper() ∈ {"1","YES","Y","OK","OKAY","YEP","YUP","CONFIRM","CONFIRMED"}</code></td>
       <td class="next">FINAL_REMINDER_SENT <span class="muted">(no-op; logged)</span></td>
-      <td class="actions"><code>RecordEvent("case.final_reminder.confirmed")</code></td>
+      <td class="actions"><code>RecordEvent("case.final_reminder.confirmed")</code> <span class="muted">(no LLM reply — geofence / EoD still drives the terminal outcome)</span></td>
       <td class="reason">final_reminder_confirmed</td>
     </tr>
     <tr>
       <td>FINAL_REMINDER_SENT</td>
-      <td class="event"><code>CallEnded(outcome.business_outcome="cancelled")</code></td>
-      <td class="guard"><span class="dash">—</span></td>
+      <td class="event"><code>CallEnded(outcome.business_outcome="cancelled")</code> <span class="muted">— voice</span> <br><code>InboundSmsReceived(body)</code> <span class="muted">— SMS</span></td>
+      <td class="guard">SMS: <code>body.upper() ∈ {"3","NO","N","CANCEL","CANCELLED","CANCELED"}</code></td>
       <td class="next terminal">CANCELLED</td>
-      <td class="actions"><code>CancelTimer(final_reminder)</code> + <code>CancelTimer(end_of_business_day)</code> + <code>RecordEvent("case.closed.cancelled")</code></td>
+      <td class="actions"><code>CancelTimer(final_reminder)</code> + <code>CancelTimer(end_of_business_day)</code> + <code>RecordEvent("case.closed.cancelled", detail="customer cancelled at final_reminder")</code></td>
       <td class="reason">final_reminder_cancelled</td>
     </tr>
     <tr>
       <td>FINAL_REMINDER_SENT</td>
-      <td class="event"><code>CallEnded(outcome.business_outcome="rescheduled")</code></td>
-      <td class="guard"><code>reschedule_count &lt; 1</code></td>
+      <td class="event"><code>CallEnded(outcome.business_outcome="rescheduled")</code> <span class="muted">— voice</span> <br><code>InboundSmsReceived(body)</code> <span class="muted">— SMS</span></td>
+      <td class="guard">SMS: <code>body.upper() ∈ {"2","RESCHEDULE","RESCHED","RESCHEDULED","RESCHEDULING","NEW TIME"}</code><br>and <code>reschedule_count &lt; 1</code></td>
       <td class="next">RESCHEDULING</td>
       <td class="actions"><code>CancelTimer(final_reminder)</code> + <code>CancelTimer(end_of_business_day)</code> + <code>RequestDealerSlots</code> + <code>RecordEvent("case.final_reminder.rescheduling")</code> + <code>patch.increment_reschedule_count</code></td>
       <td class="reason">final_reminder_rescheduling</td>
     </tr>
     <tr>
       <td>FINAL_REMINDER_SENT</td>
-      <td class="event"><code>CallEnded(outcome.business_outcome="rescheduled")</code></td>
-      <td class="guard"><code>reschedule_count == 1</code></td>
+      <td class="event"><code>CallEnded(outcome.business_outcome="rescheduled")</code> <span class="muted">— voice</span> <br><code>InboundSmsReceived(body)</code> <span class="muted">— SMS</span></td>
+      <td class="guard">same as above, but <code>reschedule_count == 1</code></td>
       <td class="next terminal">RESCHEDULE_FAILED</td>
       <td class="actions"><code>CancelTimer(final_reminder)</code> + <code>CancelTimer(end_of_business_day)</code> + <code>RecordEvent("case.closed.reschedule_failed", level=warn)</code></td>
       <td class="reason">reschedule_one_shot_exhausted</td>
+    </tr>
+    <tr>
+      <td>FINAL_REMINDER_SENT</td>
+      <td class="event"><code>InboundSmsReceived(body)</code> <span class="muted">— SMS-only</span></td>
+      <td class="guard">body does not match confirm / reschedule / cancel vocabularies above</td>
+      <td class="next">FINAL_REMINDER_SENT <span class="muted">(no transition)</span></td>
+      <td class="actions"><code>PlaceCall(stage=FINAL_REMINDER, attempt_number=max(attempt_count,1))</code> <span class="muted">(LLM-composed reply)</span> + <code>RecordEvent("case.final_reminder.free_text", detail=clipped body)</code></td>
+      <td class="reason">final_reminder_free_text_reply</td>
     </tr>
     <tr>
       <td>FINAL_REMINDER_SENT</td>
@@ -663,11 +774,11 @@
     <tr><th>State</th><th>Reached via</th></tr>
   </thead>
   <tbody>
-    <tr class="terminal"><td><code>DECLINED</code></td><td><code>CONTACTING_CUSTOMER + CallEnded(declined)</code>.</td></tr>
-    <tr class="terminal"><td><code>CANCELLED</code></td><td><code>INITIAL_REMINDER_SENT</code>, <code>FINAL_REMINDER_SENT</code>, or <code>RESCHEDULING + CallEnded(cancelled)</code>.</td></tr>
-    <tr class="terminal"><td><code>ABANDONED</code></td><td>Inconclusive call at <code>attempt_count == 2</code> in <code>CONTACTING_CUSTOMER</code> or <code>RESCHEDULING</code>.</td></tr>
+    <tr class="terminal"><td><code>DECLINED</code></td><td>Voice: <code>CONTACTING_CUSTOMER + CallEnded(declined)</code>. SMS: any outreach-shaped state (<code>CONTACTING_CUSTOMER</code>, <code>SLOT_PROPOSED</code>, <code>SLOT_PICKED</code>, <code>RESCHEDULING</code>) + <code>InboundSmsReceived</code> with the <code>N+1</code> "none of those work" digit or a <code>CANCEL</code>/<code>CANCELLED</code>/<code>CANCELED</code> keyword.</td></tr>
+    <tr class="terminal"><td><code>CANCELLED</code></td><td>Voice: <code>INITIAL_REMINDER_SENT</code>, <code>FINAL_REMINDER_SENT</code>, or <code>RESCHEDULING + CallEnded(cancelled)</code>. SMS: <code>*_REMINDER_SENT + InboundSmsReceived</code> with cancel vocabulary (<code>3</code>/<code>NO</code>/<code>N</code>/<code>CANCEL</code>/…).</td></tr>
+    <tr class="terminal"><td><code>ABANDONED</code></td><td>Inconclusive call at <code>attempt_count == 2</code> in <code>CONTACTING_CUSTOMER</code> or <code>RESCHEDULING</code>. Voice-only — SMS has no inconclusive/retry path.</td></tr>
     <tr class="terminal"><td><code>NO_SHOW</code></td><td><code>FINAL_REMINDER_SENT + EndOfBusinessDayReached</code> (no geofence-in by close of business).</td></tr>
-    <tr class="terminal"><td><code>RESCHEDULE_FAILED</code></td><td>Customer requested a second reschedule at either reminder (<code>reschedule_count == 1</code> when <code>CallEnded(rescheduled)</code> arrives).</td></tr>
+    <tr class="terminal"><td><code>RESCHEDULE_FAILED</code></td><td>Customer requested a second reschedule at either reminder (<code>reschedule_count == 1</code>), via <code>CallEnded(rescheduled)</code> on voice or <code>InboundSmsReceived</code> with reschedule vocabulary (<code>2</code>/<code>RESCHEDULE</code>/…) on SMS.</td></tr>
     <tr class="terminal"><td><code>OPTED_OUT</code></td><td>Cross-cutting <code>CustomerOptedOut</code>, or <code>CallEnded(opted_out)</code> from any non-terminal state.</td></tr>
     <tr class="terminal"><td><code>COMPLETED</code></td><td>Happy path: <code>SHOWED + VehicleExitedDealer</code>. The audit trail gets both <code>case.geofence.exited</code> and <code>case.closed.service_event_complete</code>. Also reachable via the defensive feedback-call branches above.</td></tr>
     <tr class="terminal"><td><code>BOOKED</code></td><td><em>Legacy v1 enum value.</em> No v2 reducer branch ever lands here.</td></tr>
@@ -712,6 +823,8 @@
     <tr><td><code>VehicleEnteredDealer</code></td><td><code>FINAL_REMINDER_SENT</code>, <code>FINAL_REMINDER_DUE</code></td><td><code>ignored:geofence_in_irrelevant_at_{state}</code></td></tr>
     <tr><td><code>VehicleExitedDealer</code></td><td><code>SHOWED</code> only</td><td><code>ignored:geofence_out_irrelevant_at_{state}</code></td></tr>
     <tr><td><code>CallEnded</code></td><td>Any state with a non-<code>None</code> <code>_stage_for_state</code> mapping (every active state except <code>CONFIRMING_WITH_DEALER</code>, <code>INITIAL_REMINDER_DUE</code>, <code>FINAL_REMINDER_DUE</code>)</td><td><code>ignored:call_ended_no_active_stage_at_{state}</code></td></tr>
+    <tr><td><code>InboundSmsReceived</code></td><td>Outreach-shaped states (<code>CONTACTING_CUSTOMER</code>, <code>SLOT_PROPOSED</code>, <code>SLOT_PICKED</code>, <code>RESCHEDULING</code>) and both <code>*_REMINDER_SENT</code> states. The reducer classifies the body into either a vocabulary-matched transition or a free-text LLM reply.</td><td>Unchanged + <code>RecordEvent("case.inbound.unhandled")</code>; reason <code>inbound_unhandled_at_{state}</code>. <strong>Not</strong> an <code>ignored:*</code> decision — the audit row still fires.</td></tr>
+    <tr><td><code>OutboundDispatched</code></td><td>Never transitions. Audit-only push from the outbound queue worker carrying <code>item_id</code>, real <code>twilio_sid</code>, and <code>to_phone</code>.</td><td>Unchanged + <code>RecordEvent("case.outbound.dispatched")</code>; reason <code>outbound_dispatched</code>.</td></tr>
   </tbody>
 </table>
 
@@ -719,16 +832,41 @@
   <li>Every <code>CaseDecision</code> carries a <code>reason</code>
     string. No-op decisions use <code>reason="ignored:&lt;why&gt;"</code>
     so the driver can log them at debug level without losing the audit
-    trail.</li>
+    trail. The inbound SMS unhandled-state branch is intentionally
+    <em>not</em> an <code>ignored:*</code> reason — it carries
+    <code>inbound_unhandled_at_{state}</code> and emits a
+    <code>RecordEvent</code> so operators can grep for surprise
+    customer texts.</li>
   <li>The reducer is pure: it returns actions; the driver applies them.
     Actions are: <code>PlaceCall</code>, <code>RequestDealerSlots</code>,
     <code>RequestDealerConfirmation</code>, <code>ScheduleTimer</code>,
     <code>CancelTimer</code>, <code>RecordEvent</code>.</li>
-  <li>Of those, only <code>PlaceCall</code> ever causes an LLM call
-    downstream (via the channel's <code>CallSession.start()</code>).
-    Every other action is bookkeeping / I/O against the dealer port or
-    timer wheel. Sliders (geofence, EoD, business hours) never produce
-    <code>PlaceCall</code>.</li>
+  <li><strong>Only <code>PlaceCall</code> ever causes an LLM call
+    downstream</strong>, but how depends on the case's
+    <code>initial_channel</code>:
+    <ul>
+      <li><em>Voice</em>: <code>CaseDriver._run_place_call</code> →
+        <code>CallManager.place()</code> → ElevenLabs agent (LLM runs
+        inside the ElevenLabs session).</li>
+      <li><em>SMS</em>: <code>CaseDriver._run_sms_outbound</code> →
+        <code>SmsDispatcher.dispatch_outbound()</code> →
+        <code>SmsMessageComposer.compose()</code> (LLM call) →
+        outbound queue → Twilio. There is no per-case session loop;
+        the next customer reply re-enters the reducer as a fresh
+        <code>InboundSmsReceived</code> signal.</li>
+    </ul>
+    Sliders (geofence, EoD, business hours) never produce
+    <code>PlaceCall</code>. Inbound SMS produces a fresh
+    <code>PlaceCall</code> only on the free-text and the
+    booking-acknowledgement branches; the vocabulary-matched
+    confirm / cancel / reschedule branches do not, since those
+    transitions are silent (cancel/reschedule have downstream actions
+    of their own, confirm at either reminder is a deliberate no-op).</li>
+  <li><code>OutboundDispatched</code> is the queue worker's audit
+    callback. It carries the real Twilio MessageSid (the assistant
+    turn in <code>HistoryStore</code> was written with the queue's
+    <code>item_id</code> as a placeholder handle). The reducer records
+    it; it never drives a state transition.</li>
 </ul>
 
 </body>

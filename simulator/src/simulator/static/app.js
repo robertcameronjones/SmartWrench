@@ -37,23 +37,24 @@ const state = {
 // from the current state; the UI doesn't second-guess it.
 const ALWAYS_ON_EVENT_SIGNALS = new Set(["end_of_business_day_reached"]);
 
-// Case states before the initial (T-24h) reminder has been sent.
-const INITIAL_REMINDER_PENDING = new Set([
-  "created",
-  "contacting_customer",
-  "slot_proposed",
-  "slot_picked",
-  "confirming_with_dealer",
-  "initial_reminder_due",
-  "booked",
+// Case states in which the initial (T-24h) reminder has already been
+// sent — i.e. the simulated clock has passed its fire moment. Drives
+// the "Initial reminder" segmented slider: in any of these the slider
+// reads "Due", otherwise "Before".
+const INITIAL_REMINDER_FIRED = new Set([
+  "initial_reminder_sent",
+  "final_reminder_due",
+  "final_reminder_sent",
+  "showed",
+  "awaiting_feedback",
 ]);
 
-// Case states before the final (day-of) reminder has been sent.
-const FINAL_REMINDER_PENDING = new Set([
-  ...INITIAL_REMINDER_PENDING,
-  "initial_reminder_sent",
-  "rescheduling",
-  "final_reminder_due",
+// Case states in which the final (day-of) reminder has already been
+// sent. Drives the "Final reminder" segmented slider.
+const FINAL_REMINDER_FIRED = new Set([
+  "final_reminder_sent",
+  "showed",
+  "awaiting_feedback",
 ]);
 
 // ---------- utilities ----------------------------------------------------
@@ -328,10 +329,24 @@ function paintWorldSliders() {
   paintTimeSliders();
 }
 
+// Which segment ("before" / "due") a reminder slider should show, based
+// on the live case state rather than the last button the operator
+// clicked. This is what keeps the slider pinned to "Due" after the
+// reducer transitions the case to *_reminder_sent — previously the
+// post-signal refresh blindly reset both sliders to "before".
+function reminderSegValue(kind) {
+  const s = state.activeCase && state.activeCase.state;
+  if (!s) return "before";
+  if (kind === "initial-reminder") {
+    return INITIAL_REMINDER_FIRED.has(s) ? "due" : "before";
+  }
+  return FINAL_REMINDER_FIRED.has(s) ? "due" : "before";
+}
+
 function paintTimeSliders() {
   const hasCase = Boolean(state.activeCaseId);
-  paintSegGroup("seg-initial-reminder", "before");
-  paintSegGroup("seg-final-reminder", "before");
+  paintSegGroup("seg-initial-reminder", reminderSegValue("initial-reminder"));
+  paintSegGroup("seg-final-reminder", reminderSegValue("final-reminder"));
   ["seg-initial-reminder", "seg-final-reminder"].forEach((groupId) => {
     const group = document.getElementById(groupId);
     if (!group) return;
@@ -440,15 +455,25 @@ function setCaseState(s) {
   state.caseState = s;
   $("#status-wf-text").textContent = s;
   $("#status-wf-dot").dataset.state = s;
+  // Mirror onto the case-controls readout that sits beside the
+  // state-event buttons, so the operator sees the state right where
+  // they fire signals.
+  const readout = $("#case-state-value");
+  if (readout) {
+    readout.textContent = s;
+    readout.dataset.state = s;
+  }
 }
 
-function appendLogRow({ timestamp, correlation_id, level, event, detail, source }) {
+function appendLogRow({ timestamp, correlation_id, level, event, detail, source, state }) {
   const row = document.createElement("div");
   row.className = `log-row lvl-${level || "info"}`;
+  const stateLabel = state ? escapeHtml(state) : "";
   row.innerHTML = `
     <span class="log-time">${fmtTime(timestamp)}</span>
     <span class="log-corr" title="${escapeHtml(correlation_id || "")}">${escapeHtml((correlation_id || "").slice(0, 12))}</span>
     <span class="log-event">${escapeHtml(event || "")}</span>
+    <span class="log-state" title="${stateLabel}">${stateLabel}</span>
     <span class="log-detail" title="${escapeHtml(detail || "")}">${escapeHtml(detail || "")}</span>
     <span class="log-source">${escapeHtml(source || "")}</span>
   `;
@@ -491,11 +516,19 @@ function connectWebSocket() {
     let payload;
     try { payload = JSON.parse(msg.data); } catch { return; }
     appendLogRow(payload);
-    if (typeof payload.event === "string" && payload.event.startsWith("case.")) {
-      setCaseState(payload.event.slice("case.".length));
-      if (state.activeCaseId) {
-        setTimeout(refreshActiveCase, 100);
-      }
+    // The authoritative case state now rides on every CaseEvent. Use it
+    // directly rather than parsing the event name. Falling back to a
+    // refresh keeps the sliders/buttons in sync with anything the state
+    // alone can't tell us (patches, attempt counts).
+    if (payload.state) {
+      setCaseState(payload.state);
+    }
+    if (
+      state.activeCaseId &&
+      typeof payload.event === "string" &&
+      payload.event.startsWith("case.")
+    ) {
+      setTimeout(refreshActiveCase, 100);
     }
   };
 }

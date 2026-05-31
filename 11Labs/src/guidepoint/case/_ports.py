@@ -166,6 +166,17 @@ class SmsDispatcher(Protocol):
         """
         ...
 
+    def release_routing(self, *, to_phone: str) -> None:
+        """Unbind the phone from any case it currently routes to.
+
+        Called by the driver when a case reaches a terminal state so
+        a future inbound on the same phone is treated as
+        ``unknown_phone`` instead of being routed to a closed case
+        (where the reducer would drop it anyway). Synchronous,
+        idempotent, must swallow all errors.
+        """
+        ...
+
 
 class DealerSlotPort(Protocol):
     """Driver's boundary to the dealer's slot system.

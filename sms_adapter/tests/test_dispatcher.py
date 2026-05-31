@@ -56,6 +56,7 @@ from sms_adapter import (
     Turn,
     TurnRole,
     build_json_history_store,
+    build_json_routing_store,
     build_sms_dispatcher,
     build_sms_message_composer,
 )
@@ -154,6 +155,7 @@ def _seed_case(tmp_path: Path):
         state=CaseState.CREATED,
         attempt_count=0,
         created_at=datetime(2026, 5, 10, tzinfo=UTC),
+        initial_channel="sms",
     )
     paths = JsonCasePaths.for_root(tmp_path)
     repo = build_json_case_repository(paths=paths)
@@ -166,6 +168,7 @@ def _build_dispatcher(
 ):
     case, case_repo = _seed_case(tmp_path)
     history = build_json_history_store(root=tmp_path / "history")
+    routing = build_json_routing_store(path=tmp_path / "routing.json")
     bus = build_event_bus(payload_type=CaseEvent)
     clock = FixedClock()
     composer = build_sms_message_composer(
@@ -176,15 +179,20 @@ def _build_dispatcher(
         prompt_paths=_prompt_paths(),
         bus=bus,
     )
-    dispatcher = build_sms_dispatcher(composer=composer, sender=sender)
-    return case, dispatcher, history, case_repo
+    dispatcher = build_sms_dispatcher(
+        composer=composer,
+        sender=sender,
+        routing=routing,
+        case_repo=case_repo,
+    )
+    return case, dispatcher, history, case_repo, routing
 
 
 @pytest.mark.asyncio
 async def test_dispatch_outbound_composes_sends_and_records(tmp_path: Path) -> None:
     llm = FakeLlm(replies=["Hi from Kate."])
     sender = FakeSender()
-    case, dispatcher, history, _ = _build_dispatcher(tmp_path, llm=llm, sender=sender)
+    case, dispatcher, history, _, _ = _build_dispatcher(tmp_path, llm=llm, sender=sender)
 
     item_id = await dispatcher.dispatch_outbound(
         case_id=case.case_id,
@@ -204,12 +212,43 @@ async def test_dispatch_outbound_composes_sends_and_records(tmp_path: Path) -> N
 
 
 @pytest.mark.asyncio
+async def test_dispatch_outbound_binds_routing_for_inbound_recovery(
+    tmp_path: Path,
+) -> None:
+    """The dispatcher MUST bind phone -> case_id before sending so that
+    the simulator webhook can resolve inbound replies back to the case.
+
+    Regression guard for the bug that broke the SMS happy path in the
+    first refactor pass: nothing in the new flow was calling
+    ``routing.bind()``, so customer replies all hit the
+    ``unknown_phone`` log and were dropped silently.
+    """
+
+    llm = FakeLlm(replies=["Hi from Kate."])
+    sender = FakeSender()
+    case, dispatcher, _, _, routing = _build_dispatcher(
+        tmp_path, llm=llm, sender=sender
+    )
+
+    await dispatcher.dispatch_outbound(
+        case_id=case.case_id,
+        to_phone=case.customer.phone,
+        stage=CallStage.OUTREACH,
+    )
+
+    entry = routing.find_entry(case.customer.phone)
+    assert entry is not None
+    assert entry.conversation_id == str(case.case_id)
+    assert entry.channel == "sms"
+
+
+@pytest.mark.asyncio
 async def test_dispatch_outbound_skips_history_when_sender_fails(tmp_path: Path) -> None:
     """A failing send must not leave a phantom assistant turn in history."""
 
     llm = FakeLlm(replies=["this should not stick"])
     sender = FakeSender(fail_on_next=True)
-    case, dispatcher, history, _ = _build_dispatcher(tmp_path, llm=llm, sender=sender)
+    case, dispatcher, history, _, _ = _build_dispatcher(tmp_path, llm=llm, sender=sender)
 
     with pytest.raises(RuntimeError, match="simulated queue failure"):
         await dispatcher.dispatch_outbound(
@@ -229,7 +268,9 @@ async def test_dispatch_outbound_propagates_llm_failure_without_sending(
 ) -> None:
     llm = FakeLlm(replies=[], fail_on_next=True)
     sender = FakeSender()
-    case, dispatcher, history, _ = _build_dispatcher(tmp_path, llm=llm, sender=sender)
+    case, dispatcher, history, _, _ = _build_dispatcher(
+        tmp_path, llm=llm, sender=sender
+    )
 
     with pytest.raises(RuntimeError, match="simulated LLM failure"):
         await dispatcher.dispatch_outbound(
@@ -246,7 +287,9 @@ async def test_dispatch_outbound_propagates_llm_failure_without_sending(
 async def test_record_inbound_appends_history(tmp_path: Path) -> None:
     llm = FakeLlm(replies=[])
     sender = FakeSender()
-    case, dispatcher, history, _ = _build_dispatcher(tmp_path, llm=llm, sender=sender)
+    case, dispatcher, history, _, _ = _build_dispatcher(
+        tmp_path, llm=llm, sender=sender
+    )
 
     await dispatcher.record_inbound(
         case_id=case.case_id,
@@ -260,3 +303,25 @@ async def test_record_inbound_appends_history(tmp_path: Path) -> None:
     assert turns[0].role is TurnRole.USER
     assert turns[0].text == "1"
     assert turns[0].twilio_sid == "SMin_001"
+
+
+def test_release_routing_unbinds_phone(tmp_path: Path) -> None:
+    """The driver calls release_routing when a case turns terminal so
+    a future inbound on the same phone is treated as unknown_phone."""
+
+    llm = FakeLlm(replies=[])
+    sender = FakeSender()
+    case, dispatcher, _, _, routing = _build_dispatcher(
+        tmp_path, llm=llm, sender=sender
+    )
+    routing.bind(
+        phone=case.customer.phone,
+        conversation_id=str(case.case_id),
+        user_id="",
+        channel="sms",
+    )
+    assert routing.find_entry(case.customer.phone) is not None
+
+    dispatcher.release_routing(to_phone=case.customer.phone)
+
+    assert routing.find_entry(case.customer.phone) is None

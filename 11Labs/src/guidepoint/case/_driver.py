@@ -463,6 +463,25 @@ class CaseDriver:
             except Exception:
                 return
             if case.state.is_terminal:
+                # Release any channel-specific bindings (today: the
+                # SMS routing entry phone -> case_id) so stale inbound
+                # on a closed case is treated as unknown_phone, not
+                # silently dropped against a terminal case.
+                if (
+                    self._sms_dispatcher is not None
+                    and case.initial_channel == "sms"
+                    and case.customer.phone
+                ):
+                    try:
+                        self._sms_dispatcher.release_routing(
+                            to_phone=case.customer.phone
+                        )
+                    except Exception:
+                        _log.exception(
+                            "case_driver.release_routing.failed",
+                            case_id=case_id,
+                            phone=case.customer.phone,
+                        )
                 async with self._lock:
                     self._queues.pop(case_id, None)
                     self._tasks.pop(case_id, None)
@@ -742,6 +761,10 @@ class CaseDriver:
             level=action.level,
             event=action.event,
             detail=action.detail,
+            # ``case`` here is the post-transition row (``_apply_decision``
+            # persists state before dispatching actions), so this is the
+            # state the case is now in.
+            state=case.state,
         )
         self._case_repo.append_event(case.case_id, event)
         await self._bus.publish(event)

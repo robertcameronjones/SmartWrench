@@ -482,6 +482,11 @@ class CaseEvent(BaseModel):
     level: EventLevel = "info"
     event: str = Field(min_length=1)
     detail: str = ""
+    # Case state at the moment this event was recorded (i.e. *after* any
+    # transition the originating decision applied). Optional so audit
+    # rows persisted before this field existed still load. The driver
+    # always populates it for live events.
+    state: CaseState | None = None
 
 
 # ---------------------------------------------------------------------------

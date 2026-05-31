@@ -396,6 +396,44 @@ button, input, select, textarea { font: inherit; color: inherit; }
   color: #fff;
 }
 .badge-optout[hidden] { display: none; }
+
+/* Current case-state readout, sits in the case-controls panel head
+   right above the state-event buttons so the operator sees state and
+   fires signals in the same place. */
+.case-state-readout {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 8px;
+}
+.case-state-label {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-mute);
+}
+.case-state-value {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--bg-elev-2);
+  color: var(--text);
+}
+/* idle / pre-fire */
+.case-state-value[data-state="idle"],
+.case-state-value[data-state="firing"] { color: var(--text-mute); }
+/* terminal states */
+.case-state-value[data-state="completed"] { color: var(--good); border-color: var(--good); }
+.case-state-value[data-state="declined"],
+.case-state-value[data-state="cancelled"],
+.case-state-value[data-state="abandoned"],
+.case-state-value[data-state="no_show"],
+.case-state-value[data-state="reschedule_failed"],
+.case-state-value[data-state="opted_out"],
+.case-state-value[data-state="failed"] { color: var(--bad); border-color: var(--bad); }
 .controls-hint {
   padding: 0 14px 8px;
   margin: 0;
@@ -503,7 +541,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 .log-row {
   display: grid;
-  grid-template-columns: 76px 110px 160px 1fr auto;
+  grid-template-columns: 76px 100px 150px 130px 1fr auto;
   gap: 10px;
   padding: 3px 4px;
   border-radius: 3px;
@@ -513,6 +551,22 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .log-time  { color: var(--text-mute); white-space: nowrap; }
 .log-corr  { color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .log-event { color: var(--accent); font-weight: 500; white-space: nowrap; }
+.log-state {
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  align-self: center;
+}
+.log-state:not(:empty) {
+  color: var(--text);
+  background: var(--bg-elev-2);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 0 5px;
+}
 .log-detail{
   color: var(--text);
   white-space: pre-wrap;

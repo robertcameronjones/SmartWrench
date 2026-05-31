@@ -121,7 +121,12 @@ def build_sms_session(
         bus=bus,
         event_log_path=event_log_path,
     )
-    dispatcher = build_sms_dispatcher(composer=composer, sender=twilio_send)
+    dispatcher = build_sms_dispatcher(
+        composer=composer,
+        sender=twilio_send,
+        routing=routing,
+        case_repo=case_repo,
+    )
     _log.info(
         "simulator.sms.enabled",
         model=model,
