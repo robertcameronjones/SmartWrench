@@ -179,8 +179,6 @@ def _stage_for_state(state: CaseState) -> CallStage | None:
     if state in (
         CaseState.CREATED,
         CaseState.CONTACTING_CUSTOMER,
-        CaseState.SLOT_PROPOSED,
-        CaseState.SLOT_PICKED,
         CaseState.RESCHEDULING,
     ):
         return CallStage.OUTREACH
@@ -188,7 +186,7 @@ def _stage_for_state(state: CaseState) -> CallStage | None:
         return CallStage.INITIAL_REMINDER
     if state in (CaseState.FINAL_REMINDER_DUE, CaseState.FINAL_REMINDER_SENT):
         return CallStage.FINAL_REMINDER
-    if state in (CaseState.SHOWED, CaseState.AWAITING_FEEDBACK):
+    if state == CaseState.SHOWED:
         return CallStage.FEEDBACK
     return None
 
@@ -483,15 +481,13 @@ def _on_decided_outcome(
     if case.state in (
         CaseState.CREATED,
         CaseState.CONTACTING_CUSTOMER,
-        CaseState.SLOT_PROPOSED,
-        CaseState.SLOT_PICKED,
     ):
         if bo == "booked":
             slot_id = outcome.booked_slot_id
             if slot_id is None:
                 return _ignored(case, "booked_without_slot_id")
             return CaseDecision(
-                next_state=CaseState.CONFIRMING_WITH_DEALER,
+                next_state=CaseState.BOOKED,
                 actions=(
                     RequestDealerConfirmation(case_id=case.case_id, slot_id=slot_id),
                     RecordEvent(
@@ -548,7 +544,7 @@ def _on_decided_outcome(
             if slot_id is None:
                 return _ignored(case, "rescheduling_booked_without_slot_id")
             return CaseDecision(
-                next_state=CaseState.CONFIRMING_WITH_DEALER,
+                next_state=CaseState.BOOKED,
                 actions=(
                     RequestDealerConfirmation(case_id=case.case_id, slot_id=slot_id),
                     RecordEvent(
@@ -581,7 +577,7 @@ def _on_decided_outcome(
 
     # Feedback stage --------------------------------------------------------
 
-    if case.state in (CaseState.SHOWED, CaseState.AWAITING_FEEDBACK):
+    if case.state == CaseState.SHOWED:
         if bo == "feedback":
             return CaseDecision(
                 next_state=CaseState.COMPLETED,
@@ -596,9 +592,9 @@ def _on_decided_outcome(
             )
         return _ignored(case, f"feedback_unexpected_outcome:{bo}")
 
-    # Anything else (CONFIRMING_WITH_DEALER, INITIAL_REMINDER_DUE etc with
-    # a Decided call result) is a sequencing bug — we shouldn't be calling
-    # there. Don't crash, just ignore + audit-by-reason.
+    # Anything else (BOOKED, INITIAL_REMINDER_DUE etc with a Decided call
+    # result) is a sequencing bug — we shouldn't be calling there. Don't
+    # crash, just ignore + audit-by-reason.
     return _ignored(case, f"decided_outcome_unexpected_at_{case.state.value}")
 
 
@@ -712,8 +708,6 @@ _OUTREACH_STATES: frozenset[CaseState] = frozenset(
     {
         CaseState.CREATED,
         CaseState.CONTACTING_CUSTOMER,
-        CaseState.SLOT_PROPOSED,
-        CaseState.SLOT_PICKED,
         CaseState.RESCHEDULING,
     }
 )
@@ -844,7 +838,7 @@ def _on_inbound_sms_received(case: Case, signal: InboundSmsReceived) -> CaseDeci
         if kind == "book" and picked is not None:
             display = _resolve_booked_slot_display(case, picked)
             return CaseDecision(
-                next_state=CaseState.CONFIRMING_WITH_DEALER,
+                next_state=CaseState.BOOKED,
                 actions=(
                     RequestDealerConfirmation(case_id=case.case_id, slot_id=picked),
                     _llm_reply_action(case, stage=CallStage.OUTREACH),
@@ -912,10 +906,10 @@ def _on_inbound_sms_received(case: Case, signal: InboundSmsReceived) -> CaseDeci
             reason="outreach_free_text_reply",
         )
 
-    # ---- Anywhere else (CONFIRMING_WITH_DEALER, reminder-DUE windows,
-    # SHOWED, AWAITING_FEEDBACK) — log + ignore. We don't crash, and we
-    # don't trigger a new LLM round-trip; the customer may text us
-    # mid-flight while we're awaiting an external event.
+    # ---- Anywhere else (BOOKED, reminder-DUE windows, SHOWED) — log +
+    # ignore. We don't crash, and we don't trigger a new LLM round-trip;
+    # the customer may text us mid-flight while we're awaiting an external
+    # event.
 
     return CaseDecision(
         next_state=case.state,
@@ -994,7 +988,7 @@ def _on_dealer_confirmed(
       ``FINAL_REMINDER_DUE`` and arm only ``TIMER_FINAL_REMINDER``.
     """
 
-    if case.state != CaseState.CONFIRMING_WITH_DEALER:
+    if case.state != CaseState.BOOKED:
         return _ignored(case, f"dealer_confirmed_irrelevant_at_{case.state.value}")
 
     # Find the slot's start time. The reducer needs the slot timestamp
@@ -1067,7 +1061,7 @@ def _on_dealer_confirmed(
 def _on_dealer_rejected(case: Case, signal: DealerRejected) -> CaseDecision:
     """Dealer rejected the proposed slot — re-propose to the customer."""
 
-    if case.state != CaseState.CONFIRMING_WITH_DEALER:
+    if case.state != CaseState.BOOKED:
         return _ignored(case, f"dealer_rejected_irrelevant_at_{case.state.value}")
     return CaseDecision(
         next_state=CaseState.RESCHEDULING,

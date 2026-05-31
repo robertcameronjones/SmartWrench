@@ -185,13 +185,14 @@ class Trigger(BaseModel):
 class CaseState(StrEnum):
     """Where a case is in its business lifecycle.
 
-    V2 full-lifecycle enum: trigger → outreach → dealer confirmation →
-    booking → initial reminder → final reminder → service event →
-    feedback → closed.
+    V2 lifecycle enum: trigger → outreach → dealer confirmation →
+    initial reminder → final reminder → service event → closed.
 
-    The case-state machine is owned exclusively by ``CaseManager`` (the
-    v1 manager loop today; the v2 ``CaseDriver`` + pure reducer after
-    Phase 3/4). Channel-internal lifecycle (dial, opened, conversing)
+    Only states the v2 ``CaseDriver`` + pure reducer actually produce are
+    declared. The reachability audit lives in
+    ``docs/case-state-jump-table.html``; if you add a member here, add the
+    ``next_state=`` branch that produces it in the same change, or it is
+    dead weight. Channel-internal lifecycle (dial, opened, conversing)
     lives inside each ``CallManager`` and never appears here.
 
     Reminder stages are split into ``*_DUE`` (timer armed, nothing sent
@@ -204,19 +205,18 @@ class CaseState(StrEnum):
     # Non-terminal lifecycle states.
     CREATED = "created"
     CONTACTING_CUSTOMER = "contacting_customer"
-    SLOT_PROPOSED = "slot_proposed"
-    SLOT_PICKED = "slot_picked"
-    CONFIRMING_WITH_DEALER = "confirming_with_dealer"
+    # The customer has picked a slot and it has been confirmed (dealer
+    # confirmation is stubbed today). The appointment exists; the case now
+    # rests here until the reminder timers fire. Non-terminal.
+    BOOKED = "booked"
     INITIAL_REMINDER_DUE = "initial_reminder_due"
     INITIAL_REMINDER_SENT = "initial_reminder_sent"
     RESCHEDULING = "rescheduling"
     FINAL_REMINDER_DUE = "final_reminder_due"
     FINAL_REMINDER_SENT = "final_reminder_sent"
     SHOWED = "showed"
-    AWAITING_FEEDBACK = "awaiting_feedback"
 
     # Terminal states (case closed).
-    BOOKED = "booked"
     DECLINED = "declined"
     CANCELLED = "cancelled"
     ABANDONED = "abandoned"
@@ -233,7 +233,6 @@ class CaseState(StrEnum):
 
 _TERMINAL_CASE_STATES: frozenset[CaseState] = frozenset(
     {
-        CaseState.BOOKED,
         CaseState.DECLINED,
         CaseState.CANCELLED,
         CaseState.ABANDONED,
@@ -258,6 +257,16 @@ _TERMINAL_CASE_STATES: frozenset[CaseState] = frozenset(
 # sent". They are renamed to the symmetric *_DUE / *_SENT pair so each
 # touchpoint has the same four customer outcomes (confirm / reschedule /
 # cancel / no response).
+#
+# Renames / retired states: slot_proposed / slot_picked were outreach
+# sub-states the v2 reducer never produced (outreach collapses into
+# contacting_customer); awaiting_feedback was a feedback touchpoint that
+# was never wired (showed → completed on geofence-out). The old
+# confirming_with_dealer state was renamed to booked — the customer has
+# picked a slot and it is confirmed, so the case is booked while it waits
+# for the reminder timers. (The v1 terminal "booked" is gone; "booked" is
+# now this live non-terminal value.) Mapped here only so any fossil
+# persisted rows still load instead of raising.
 _LEGACY_STATE_MIGRATIONS: dict[str, str] = {
     "ready_to_call": "contacting_customer",
     "calling": "contacting_customer",
@@ -268,6 +277,10 @@ _LEGACY_STATE_MIGRATIONS: dict[str, str] = {
     "reminded": "initial_reminder_sent",
     "confirmed": "final_reminder_due",
     "day_of": "final_reminder_sent",
+    "slot_proposed": "contacting_customer",
+    "slot_picked": "contacting_customer",
+    "awaiting_feedback": "showed",
+    "confirming_with_dealer": "booked",
 }
 
 

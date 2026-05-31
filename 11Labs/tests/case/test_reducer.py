@@ -331,7 +331,7 @@ def test_outreach_booked_routes_to_dealer_confirmation() -> None:
     case = _case(state=CaseState.CONTACTING_CUSTOMER, attempt_count=1)
     signal = _call_ended(case, business_outcome="booked", booked_slot_id=SLOT_A)
     decision = decide_next_case_state(case, signal, now=NOW)
-    assert decision.next_state == CaseState.CONFIRMING_WITH_DEALER
+    assert decision.next_state == CaseState.BOOKED
     assert decision.patch.booked_slot_id == SLOT_A
     confirms = [
         a for a in decision.actions if isinstance(a, RequestDealerConfirmation)
@@ -394,7 +394,7 @@ def test_dealer_confirmed_far_slot_arms_both_reminders() -> None:
     are armed up front. Arming the final reminder at confirm time means
     silence on the initial reminder still drives the day-of nudge."""
     case = _case(
-        state=CaseState.CONFIRMING_WITH_DEALER,
+        state=CaseState.BOOKED,
         slot_starts_at=SLOT_FAR,
         booked_slot_id=SLOT_A,
     )
@@ -412,7 +412,7 @@ def test_dealer_confirmed_near_slot_skips_initial_reminder() -> None:
     """Near slot (< 24h): skip the initial reminder entirely. Only the
     final-reminder timer is armed; case lands in ``FINAL_REMINDER_DUE``."""
     case = _case(
-        state=CaseState.CONFIRMING_WITH_DEALER,
+        state=CaseState.BOOKED,
         slot_starts_at=SLOT_NEAR,
         booked_slot_id=SLOT_A,
     )
@@ -426,7 +426,7 @@ def test_dealer_confirmed_near_slot_skips_initial_reminder() -> None:
 
 
 def test_dealer_confirmed_unknown_slot_is_ignored() -> None:
-    case = _case(state=CaseState.CONFIRMING_WITH_DEALER)
+    case = _case(state=CaseState.BOOKED)
     signal = DealerConfirmed(timestamp=NOW, case_id=case.case_id, slot_id=SlotId("nope"))
     decision = decide_next_case_state(case, signal, now=NOW)
     assert decision.is_noop
@@ -434,7 +434,7 @@ def test_dealer_confirmed_unknown_slot_is_ignored() -> None:
 
 
 def test_dealer_rejected_kicks_to_rescheduling() -> None:
-    case = _case(state=CaseState.CONFIRMING_WITH_DEALER, booked_slot_id=SLOT_A)
+    case = _case(state=CaseState.BOOKED, booked_slot_id=SLOT_A)
     signal = DealerRejected(
         timestamp=NOW, case_id=case.case_id, slot_id=SLOT_A, reason="no tech"
     )
@@ -535,7 +535,7 @@ def test_rescheduling_booked_returns_to_dealer_confirmation() -> None:
     case = _case(state=CaseState.RESCHEDULING, attempt_count=3)
     signal = _call_ended(case, business_outcome="booked", booked_slot_id=SLOT_A)
     decision = decide_next_case_state(case, signal, now=NOW)
-    assert decision.next_state == CaseState.CONFIRMING_WITH_DEALER
+    assert decision.next_state == CaseState.BOOKED
     assert decision.patch.booked_slot_id == SLOT_A
 
 
@@ -687,14 +687,14 @@ def test_end_of_day_irrelevant_outside_final_reminder_sent() -> None:
 
 
 def test_feedback_captured_completes_case() -> None:
-    case = _case(state=CaseState.AWAITING_FEEDBACK, attempt_count=4)
+    case = _case(state=CaseState.SHOWED, attempt_count=4)
     signal = _call_ended(case, business_outcome="feedback")
     decision = decide_next_case_state(case, signal, now=NOW)
     assert decision.next_state == CaseState.COMPLETED
 
 
 def test_feedback_silence_after_retry_completes_case() -> None:
-    case = _case(state=CaseState.AWAITING_FEEDBACK, attempt_count=MAX_CALL_ATTEMPTS)
+    case = _case(state=CaseState.SHOWED, attempt_count=MAX_CALL_ATTEMPTS)
     signal = _call_ended(case, business_outcome="inconclusive", result="no_answer")
     decision = decide_next_case_state(case, signal, now=NOW)
     assert decision.next_state == CaseState.COMPLETED

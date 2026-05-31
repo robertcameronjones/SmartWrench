@@ -38,12 +38,12 @@ NOW = datetime(2026, 5, 10, 12, 0, tzinfo=UTC)
 RECOVERABLE_STATES = (
     CaseState.CREATED,
     CaseState.CONTACTING_CUSTOMER,
+    CaseState.BOOKED,
     CaseState.INITIAL_REMINDER_DUE,
     CaseState.INITIAL_REMINDER_SENT,
     CaseState.FINAL_REMINDER_DUE,
     CaseState.FINAL_REMINDER_SENT,
     CaseState.SHOWED,
-    CaseState.AWAITING_FEEDBACK,
 )
 
 

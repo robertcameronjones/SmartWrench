@@ -41,7 +41,6 @@ class TestOfferedSlot:
 
 class TestCaseStates:
     def test_terminal_states_marked(self) -> None:
-        assert CaseState.BOOKED.is_terminal
         assert CaseState.DECLINED.is_terminal
         assert CaseState.CANCELLED.is_terminal
         assert CaseState.ABANDONED.is_terminal
@@ -54,16 +53,13 @@ class TestCaseStates:
         for state in (
             CaseState.CREATED,
             CaseState.CONTACTING_CUSTOMER,
-            CaseState.SLOT_PROPOSED,
-            CaseState.SLOT_PICKED,
-            CaseState.CONFIRMING_WITH_DEALER,
+            CaseState.BOOKED,
             CaseState.INITIAL_REMINDER_DUE,
             CaseState.INITIAL_REMINDER_SENT,
             CaseState.RESCHEDULING,
             CaseState.FINAL_REMINDER_DUE,
             CaseState.FINAL_REMINDER_SENT,
             CaseState.SHOWED,
-            CaseState.AWAITING_FEEDBACK,
         ):
             assert not state.is_terminal, f"{state.value} should be non-terminal"
 

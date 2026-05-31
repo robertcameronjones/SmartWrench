@@ -55,7 +55,7 @@
   ],
   "initial_channel": "voice",
   "user_id": "demo",
-  "state": "confirming_with_dealer",
+  "state": "booked",
   "attempt_count": 2,
   "next_attempt_at": null,
   "reschedule_count": 0,

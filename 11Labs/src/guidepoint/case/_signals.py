@@ -184,8 +184,8 @@ class VehicleExitedDealer(BaseModel):
     """Vehicle crossed out of the dealer geofence.
 
     The inferred meaning: service event complete, customer left. Driver
-    resolves to the case(s) for ``vehicle_vin`` currently in
-    ``SHOWED`` (transition to ``AWAITING_FEEDBACK``).
+    resolves to the case(s) for ``vehicle_vin`` currently in ``SHOWED``
+    (transition to ``COMPLETED``).
     """
 
     model_config = _frozen_strict()

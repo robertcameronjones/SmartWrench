@@ -17,6 +17,7 @@
     --bg-term: #fff4f0;
     --bg-cross: #f0f6ff;
     --bg-defensive: #f7f5ee;
+    --bg-garbage: #fdecec;
     --bg-note: #fffaee;
     --rule-note: #c08000;
   }
@@ -96,6 +97,10 @@
   .terminal td.next { font-weight: 600; }
   .cross    { background: var(--bg-cross); }
   .defensive { background: var(--bg-defensive); }
+  .garbage  { background: var(--bg-garbage); }
+  .garbage td.state-name { font-weight: 600; text-decoration: line-through; }
+  .verdict-ok { color: #1a7f37; font-weight: 600; }
+  .verdict-bad { color: #b3261e; font-weight: 600; }
   .muted    { color: var(--ink-soft); font-style: italic; }
   .faint    { color: var(--ink-faint); font-size: 9.5px; }
   .dash { color: var(--ink-faint); }
@@ -143,18 +148,114 @@
 
 <h1>Case state jump table — as implemented</h1>
 <p class="source">
-  Source of truth: <code>11Labs/src/guidepoint/case/_reducer.py</code> on
-  branch <code>v2</code>. Every row maps to a single branch in the reducer.
-  The reducer is total: any (state, signal) pair not listed in a state's
-  block is handled by the cross-cutting rules below, or by the implicit
-  rule "<em>anything else returns <code>ignored:&lt;why&gt;</code>, no state
-  change, no actions</em>".
+  Source of truth: <code>11Labs/src/guidepoint/case/_reducer.py</code> and
+  <code>_models.py</code> (<code>CaseState</code>) on branch <code>v2</code>.
+  Every row maps to a single branch in the reducer. The reducer is total:
+  any (state, signal) pair not listed in a state's block is handled by the
+  cross-cutting rules below, or by the implicit rule "<em>anything else
+  returns <code>ignored:&lt;why&gt;</code>, no state change, no actions</em>".
+  The <strong>state inventory</strong> below is the authoritative
+  reachability audit — <code>CaseState</code> declares 16 members and every
+  one is reachable in v2 (the dead "pineapple" values were nuked; see the
+  retired-values note below).
 </p>
 
 <div class="legend">
   <span class="cross">cross-cutting (applies at every non-terminal state)</span>
   <span class="terminal">terminal transition / state</span>
   <span class="defensive">defensive branch (off-path but reducer is total)</span>
+</div>
+
+<h2>State inventory &amp; reachability audit</h2>
+<p class="source">
+  Every member of the <code>CaseState</code> enum, and the v2 code path
+  that produces it. "Produced by" lists the
+  <code>next_state=CaseState.X</code> assignments in the reducer (plus the
+  factory seed for <code>CREATED</code>). After the dead-state nuke every
+  declared member is reachable; retired/renamed values now survive only as
+  legacy-migration string keys (see the note below the table) so fossil
+  persisted rows still load.
+</p>
+<table>
+  <colgroup>
+    <col style="width:20%">
+    <col style="width:10%">
+    <col style="width:13%">
+    <col style="width:57%">
+  </colgroup>
+  <thead>
+    <tr><th>State</th><th>Kind</th><th>Reachable?</th><th>Produced by (else why it's dead)</th></tr>
+  </thead>
+  <tbody>
+    <tr><td class="state-name"><code>CREATED</code></td><td>seed</td><td class="verdict-ok">yes</td><td><code>create_case_from_trigger()</code> in <code>_factory.py</code> (initial state of every new case).</td></tr>
+    <tr><td class="state-name"><code>CONTACTING_CUSTOMER</code></td><td>active</td><td class="verdict-ok">yes</td><td><code>_on_case_created</code>; <code>_on_dealer_slots_listed</code> (reschedule re-pick); inconclusive-retry.</td></tr>
+    <tr><td class="state-name"><code>BOOKED</code></td><td>active</td><td class="verdict-ok">yes</td><td>outreach <code>booked</code> (voice + SMS digit pick); reschedule <code>booked</code>. The customer has picked a slot and it is confirmed (dealer confirm is stubbed); the case rests here, non-terminal, until the reminder timers fire. <em>(Renamed from the old <code>CONFIRMING_WITH_DEALER</code>.)</em></td></tr>
+    <tr><td class="state-name"><code>INITIAL_REMINDER_DUE</code></td><td>active</td><td class="verdict-ok">yes</td><td><code>_on_dealer_confirmed</code> (far slot, ≥24h).</td></tr>
+    <tr><td class="state-name"><code>INITIAL_REMINDER_SENT</code></td><td>active</td><td class="verdict-ok">yes</td><td><code>_on_initial_reminder_due</code>; initial-reminder confirm no-op.</td></tr>
+    <tr><td class="state-name"><code>RESCHEDULING</code></td><td>active</td><td class="verdict-ok">yes</td><td><code>_on_dealer_rejected</code>; reschedule outcome at either reminder.</td></tr>
+    <tr><td class="state-name"><code>FINAL_REMINDER_DUE</code></td><td>active</td><td class="verdict-ok">yes</td><td><code>_on_dealer_confirmed</code> (near slot, &lt;24h, skips initial).</td></tr>
+    <tr><td class="state-name"><code>FINAL_REMINDER_SENT</code></td><td>active</td><td class="verdict-ok">yes</td><td><code>_on_final_reminder_due</code> (from DUE, or defensively from initial states); final-reminder confirm no-op.</td></tr>
+    <tr><td class="state-name"><code>SHOWED</code></td><td>active</td><td class="verdict-ok">yes</td><td><code>_on_vehicle_entered</code> (from <code>FINAL_REMINDER_SENT</code> or defensively from <code>FINAL_REMINDER_DUE</code>).</td></tr>
+    <tr class="terminal"><td class="state-name"><code>DECLINED</code></td><td>terminal</td><td class="verdict-ok">yes</td><td>outreach <code>declined</code> (voice); SMS "none of those work" / <code>CANCEL</code> keyword.</td></tr>
+    <tr class="terminal"><td class="state-name"><code>CANCELLED</code></td><td>terminal</td><td class="verdict-ok">yes</td><td>cancel at either reminder (voice/SMS); reschedule-stage cancel.</td></tr>
+    <tr class="terminal"><td class="state-name"><code>ABANDONED</code></td><td>terminal</td><td class="verdict-ok">yes</td><td>outreach / reschedule inconclusive at <code>attempt_count == 2</code> (voice-only).</td></tr>
+    <tr class="terminal"><td class="state-name"><code>NO_SHOW</code></td><td>terminal</td><td class="verdict-ok">yes</td><td><code>FINAL_REMINDER_SENT + EndOfBusinessDayReached</code>.</td></tr>
+    <tr class="terminal"><td class="state-name"><code>RESCHEDULE_FAILED</code></td><td>terminal</td><td class="verdict-ok">yes</td><td>second reschedule request (<code>reschedule_count == 1</code>) at either reminder.</td></tr>
+    <tr class="terminal"><td class="state-name"><code>OPTED_OUT</code></td><td>terminal</td><td class="verdict-ok">yes</td><td>universal opt-out (<code>CustomerOptedOut</code> or <code>CallEnded(opted_out)</code>).</td></tr>
+    <tr class="terminal"><td class="state-name"><code>COMPLETED</code></td><td>terminal</td><td class="verdict-ok">yes</td><td><code>SHOWED + VehicleExitedDealer</code> (happy path); feedback completion branch also points here.</td></tr>
+  </tbody>
+</table>
+<div class="note">
+  <h3>Retired / renamed values (legacy-migration keys only)</h3>
+  <p>
+    These are no longer declared on <code>CaseState</code>. They live only
+    as keys in <code>_LEGACY_STATE_MIGRATIONS</code> so any fossil persisted
+    row still validates instead of raising:
+  </p>
+  <ul class="notes">
+    <li><code>slot_proposed</code>, <code>slot_picked</code> → migrate to
+      <code>contacting_customer</code>. v1 outreach sub-states; v2 collapses
+      all outreach into <code>CONTACTING_CUSTOMER</code>.</li>
+    <li><code>awaiting_feedback</code> → migrate to <code>showed</code>. A
+      feedback touchpoint that was specced but never wired; <code>SHOWED</code>
+      goes straight to <code>COMPLETED</code> on geofence-out.</li>
+    <li><code>confirming_with_dealer</code> → migrate to <code>booked</code>.
+      <strong>Renamed, not deleted:</strong> the customer has picked a slot
+      and it is confirmed, so the case <em>is</em> booked while it waits on
+      the reminder timers. The old v1 terminal <code>booked</code> is gone —
+      <code>booked</code> is now this live, non-terminal value.</li>
+  </ul>
+</div>
+
+<div class="note">
+  <h3>Naming smell: <code>*_SENT</code> is the <em>actionable</em> send state, not a "done" state</h3>
+  <p>
+    The reducer transitions <code>*_REMINDER_DUE → *_REMINDER_SENT</code>
+    <strong>before</strong> the message is composed or sent: the driver
+    persists <code>final_reminder_sent</code> first, then dispatches the
+    <code>PlaceCall</code>, and only then does the SMS composer read the
+    case and hand the LLM <code>case_state = final_reminder_sent</code>. So
+    the state the model sees while it is being asked to <em>send</em> the
+    reminder is already named in the past tense ("sent").
+  </p>
+  <p>
+    Observed failure (kate-v2, case <code>case_144ae743d013944b</code>): the
+    initial reminder composed correctly, but the day-of reminder — same
+    mechanism, but now with a prior reminder already in the transcript and a
+    <code>..._sent</code> state name — led the model to the post-booking
+    prompt's "any other state" escape hatch, which was then delivered to the
+    customer verbatim ("Got it — the system isn't expecting input from me
+    right now."). Two coupled defects: (a) a past-tense state used as the
+    "do it now" trigger, and (b) a fallback branch that emits real
+    customer-facing text with no "diagnostic, do not send" guard.
+  </p>
+  <p>
+    Cleaner shape: keep the case in <code>*_REMINDER_DUE</code> while
+    composing/sending and only advance to <code>*_REMINDER_SENT</code>
+    after the send succeeds (and key the post-booking prompt on
+    <code>*_due</code>); or drop the DUE/SENT split for the actionable
+    moment entirely.
+  </p>
 </div>
 
 <h2>Constants referenced below</h2>
@@ -302,12 +403,12 @@
     </tr>
 
     <!-- CONTACTING_CUSTOMER ================================================ -->
-    <tr class="state-head"><td colspan="6">CONTACTING_CUSTOMER <span class="faint">(same handler applies to legacy SLOT_PROPOSED and SLOT_PICKED)</span></td></tr>
+    <tr class="state-head"><td colspan="6">CONTACTING_CUSTOMER</td></tr>
     <tr>
       <td>CONTACTING_CUSTOMER</td>
       <td class="event"><code>CallEnded(outcome.business_outcome="booked", booked_slot_id=X)</code></td>
       <td class="guard"><code>X is not None</code></td>
-      <td class="next">CONFIRMING_WITH_DEALER</td>
+      <td class="next">BOOKED</td>
       <td class="actions"><code>RequestDealerConfirmation(slot_id=X)</code> + <code>RecordEvent("case.slot.picked")</code> + <code>patch(booked_slot_id=X, booked_slot_display=...)</code></td>
       <td class="reason">outreach_booked</td>
     </tr>
@@ -355,7 +456,7 @@
       <td>CONTACTING_CUSTOMER</td>
       <td class="event"><code>InboundSmsReceived(body)</code></td>
       <td class="guard"><code>body</code> is a digit in <code>1..N</code> where <code>N=len(offered_slots)</code></td>
-      <td class="next">CONFIRMING_WITH_DEALER</td>
+      <td class="next">BOOKED</td>
       <td class="actions"><code>RequestDealerConfirmation(slot_id=X)</code> + <code>PlaceCall(stage=OUTREACH, attempt_number=max(attempt_count,1))</code> <span class="muted">(LLM ack to the customer)</span> + <code>RecordEvent("case.slot.picked", detail="customer picked slot X via SMS; confirming with dealer")</code> + <code>patch(booked_slot_id=X, booked_slot_display=...)</code></td>
       <td class="reason">outreach_booked_via_inbound</td>
     </tr>
@@ -384,10 +485,10 @@
       <td class="reason">outreach_free_text_reply</td>
     </tr>
 
-    <!-- CONFIRMING_WITH_DEALER ============================================= -->
-    <tr class="state-head"><td colspan="6">CONFIRMING_WITH_DEALER</td></tr>
+    <!-- BOOKED ============================================================= -->
+    <tr class="state-head"><td colspan="6">BOOKED <span class="faint">(renamed from CONFIRMING_WITH_DEALER; customer has picked &amp; confirmed a slot, resting until reminders fire)</span></td></tr>
     <tr>
-      <td>CONFIRMING_WITH_DEALER</td>
+      <td>BOOKED</td>
       <td class="event"><code>DealerConfirmed(slot_id=X)</code></td>
       <td class="guard"><code>slot.starts_at − now &ge; 24h</code></td>
       <td class="next">INITIAL_REMINDER_DUE</td>
@@ -395,7 +496,7 @@
       <td class="reason">confirmed_awaiting_initial_reminder</td>
     </tr>
     <tr>
-      <td>CONFIRMING_WITH_DEALER</td>
+      <td>BOOKED</td>
       <td class="event"><code>DealerConfirmed(slot_id=X)</code></td>
       <td class="guard"><code>slot.starts_at − now &lt; 24h</code></td>
       <td class="next">FINAL_REMINDER_DUE</td>
@@ -403,7 +504,7 @@
       <td class="reason">confirmed_skip_initial_reminder</td>
     </tr>
     <tr class="defensive">
-      <td>CONFIRMING_WITH_DEALER</td>
+      <td>BOOKED</td>
       <td class="event"><code>DealerConfirmed(slot_id=X)</code></td>
       <td class="guard"><code>X ∉ case.offered_slots</code></td>
       <td class="next"><em>unchanged</em></td>
@@ -411,7 +512,7 @@
       <td class="reason">ignored:dealer_confirmed_unknown_slot</td>
     </tr>
     <tr>
-      <td>CONFIRMING_WITH_DEALER</td>
+      <td>BOOKED</td>
       <td class="event"><code>DealerRejected(slot_id, reason)</code></td>
       <td class="guard"><span class="dash">—</span></td>
       <td class="next">RESCHEDULING</td>
@@ -527,7 +628,7 @@
       <td>RESCHEDULING</td>
       <td class="event"><code>CallEnded(outcome.business_outcome="booked", booked_slot_id=X)</code></td>
       <td class="guard"><code>X is not None</code></td>
-      <td class="next">CONFIRMING_WITH_DEALER</td>
+      <td class="next">BOOKED</td>
       <td class="actions"><code>RequestDealerConfirmation(slot_id=X)</code> + <code>RecordEvent("case.reschedule.picked")</code> + <code>patch(booked_slot_id=X, booked_slot_display=...)</code></td>
       <td class="reason">rescheduling_booked</td>
     </tr>
@@ -575,7 +676,7 @@
       <td>RESCHEDULING</td>
       <td class="event"><code>InboundSmsReceived(body)</code></td>
       <td class="guard"><code>body</code> is a digit in <code>1..N</code> where <code>N=len(offered_slots)</code></td>
-      <td class="next">CONFIRMING_WITH_DEALER</td>
+      <td class="next">BOOKED</td>
       <td class="actions"><code>RequestDealerConfirmation(slot_id=X)</code> + <code>PlaceCall(stage=OUTREACH, attempt_number=max(attempt_count,1))</code> <span class="muted">(LLM ack)</span> + <code>RecordEvent("case.slot.picked")</code> + <code>patch(booked_slot_id=X, booked_slot_display=...)</code></td>
       <td class="reason">outreach_booked_via_inbound</td>
     </tr>
@@ -707,7 +808,7 @@
     </tr>
 
     <!-- SHOWED ============================================================= -->
-    <tr class="state-head"><td colspan="6">SHOWED <span class="faint">(same feedback handlers also apply to legacy AWAITING_FEEDBACK)</span></td></tr>
+    <tr class="state-head"><td colspan="6">SHOWED</td></tr>
     <tr>
       <td>SHOWED</td>
       <td class="event"><code>VehicleExitedDealer</code></td>
@@ -774,32 +875,15 @@
     <tr><th>State</th><th>Reached via</th></tr>
   </thead>
   <tbody>
-    <tr class="terminal"><td><code>DECLINED</code></td><td>Voice: <code>CONTACTING_CUSTOMER + CallEnded(declined)</code>. SMS: any outreach-shaped state (<code>CONTACTING_CUSTOMER</code>, <code>SLOT_PROPOSED</code>, <code>SLOT_PICKED</code>, <code>RESCHEDULING</code>) + <code>InboundSmsReceived</code> with the <code>N+1</code> "none of those work" digit or a <code>CANCEL</code>/<code>CANCELLED</code>/<code>CANCELED</code> keyword.</td></tr>
+    <tr class="terminal"><td><code>DECLINED</code></td><td>Voice: <code>CONTACTING_CUSTOMER + CallEnded(declined)</code>. SMS: any outreach-shaped state (<code>CONTACTING_CUSTOMER</code>, <code>RESCHEDULING</code>) + <code>InboundSmsReceived</code> with the <code>N+1</code> "none of those work" digit or a <code>CANCEL</code>/<code>CANCELLED</code>/<code>CANCELED</code> keyword.</td></tr>
     <tr class="terminal"><td><code>CANCELLED</code></td><td>Voice: <code>INITIAL_REMINDER_SENT</code>, <code>FINAL_REMINDER_SENT</code>, or <code>RESCHEDULING + CallEnded(cancelled)</code>. SMS: <code>*_REMINDER_SENT + InboundSmsReceived</code> with cancel vocabulary (<code>3</code>/<code>NO</code>/<code>N</code>/<code>CANCEL</code>/…).</td></tr>
     <tr class="terminal"><td><code>ABANDONED</code></td><td>Inconclusive call at <code>attempt_count == 2</code> in <code>CONTACTING_CUSTOMER</code> or <code>RESCHEDULING</code>. Voice-only — SMS has no inconclusive/retry path.</td></tr>
     <tr class="terminal"><td><code>NO_SHOW</code></td><td><code>FINAL_REMINDER_SENT + EndOfBusinessDayReached</code> (no geofence-in by close of business).</td></tr>
     <tr class="terminal"><td><code>RESCHEDULE_FAILED</code></td><td>Customer requested a second reschedule at either reminder (<code>reschedule_count == 1</code>), via <code>CallEnded(rescheduled)</code> on voice or <code>InboundSmsReceived</code> with reschedule vocabulary (<code>2</code>/<code>RESCHEDULE</code>/…) on SMS.</td></tr>
     <tr class="terminal"><td><code>OPTED_OUT</code></td><td>Cross-cutting <code>CustomerOptedOut</code>, or <code>CallEnded(opted_out)</code> from any non-terminal state.</td></tr>
     <tr class="terminal"><td><code>COMPLETED</code></td><td>Happy path: <code>SHOWED + VehicleExitedDealer</code>. The audit trail gets both <code>case.geofence.exited</code> and <code>case.closed.service_event_complete</code>. Also reachable via the defensive feedback-call branches above.</td></tr>
-    <tr class="terminal"><td><code>BOOKED</code></td><td><em>Legacy v1 enum value.</em> No v2 reducer branch ever lands here.</td></tr>
   </tbody>
 </table>
-
-<h2>States in the enum the v2 reducer never lands in</h2>
-<ul class="notes">
-  <li><code>SLOT_PROPOSED</code>, <code>SLOT_PICKED</code> — legacy v1
-    enum values. <code>_on_decided_outcome</code> and
-    <code>_stage_for_state</code> still handle them identically to
-    <code>CONTACTING_CUSTOMER</code> (so migrated v1 cases keep working),
-    but no v2 reducer branch transitions <em>into</em> them.</li>
-  <li><code>AWAITING_FEEDBACK</code> — legacy. The feedback handlers in
-    <code>_on_decided_outcome</code> and <code>_on_incomplete_outcome</code>
-    accept it alongside <code>SHOWED</code>; no v2 reducer branch
-    transitions <em>into</em> it.</li>
-  <li><code>BOOKED</code> — legacy terminal. Replaced by the
-    <code>CONFIRMING_WITH_DEALER → INITIAL_REMINDER_DUE / FINAL_REMINDER_DUE</code>
-    path. No v2 reducer branch lands here.</li>
-</ul>
 
 <h2>Signals the reducer accepts but only consumes at specific states</h2>
 <table>
@@ -815,15 +899,15 @@
     <tr><td><code>CaseCreated</code></td><td><code>CREATED</code> only</td><td><code>ignored:case_created_irrelevant_at_{state}</code></td></tr>
     <tr><td><code>BusinessHoursOpened</code> / <code>BusinessHoursClosed</code></td><td><em>never</em> — reducer always returns <code>ignored:hours_handled_by_outbound_queue</code></td><td>same</td></tr>
     <tr><td><code>EndOfBusinessDayReached</code></td><td><code>FINAL_REMINDER_SENT</code> only</td><td><code>ignored:eod_irrelevant_at_{state}</code></td></tr>
-    <tr><td><code>DealerConfirmed</code></td><td><code>CONFIRMING_WITH_DEALER</code> only</td><td><code>ignored:dealer_confirmed_irrelevant_at_{state}</code></td></tr>
-    <tr><td><code>DealerRejected</code></td><td><code>CONFIRMING_WITH_DEALER</code> only</td><td><code>ignored:dealer_rejected_irrelevant_at_{state}</code></td></tr>
+    <tr><td><code>DealerConfirmed</code></td><td><code>BOOKED</code> only</td><td><code>ignored:dealer_confirmed_irrelevant_at_{state}</code></td></tr>
+    <tr><td><code>DealerRejected</code></td><td><code>BOOKED</code> only</td><td><code>ignored:dealer_rejected_irrelevant_at_{state}</code></td></tr>
     <tr><td><code>DealerSlotsListed</code></td><td><code>RESCHEDULING</code> only</td><td><code>ignored:slots_listed_irrelevant_at_{state}</code></td></tr>
     <tr><td><code>InitialReminderDue</code></td><td><code>INITIAL_REMINDER_DUE</code> only</td><td><code>ignored:initial_reminder_due_irrelevant_at_{state}</code></td></tr>
     <tr><td><code>FinalReminderDue</code></td><td><code>FINAL_REMINDER_DUE</code>, <code>INITIAL_REMINDER_DUE</code>, <code>INITIAL_REMINDER_SENT</code></td><td><code>ignored:final_reminder_due_irrelevant_at_{state}</code></td></tr>
     <tr><td><code>VehicleEnteredDealer</code></td><td><code>FINAL_REMINDER_SENT</code>, <code>FINAL_REMINDER_DUE</code></td><td><code>ignored:geofence_in_irrelevant_at_{state}</code></td></tr>
     <tr><td><code>VehicleExitedDealer</code></td><td><code>SHOWED</code> only</td><td><code>ignored:geofence_out_irrelevant_at_{state}</code></td></tr>
-    <tr><td><code>CallEnded</code></td><td>Any state with a non-<code>None</code> <code>_stage_for_state</code> mapping (every active state except <code>CONFIRMING_WITH_DEALER</code>, <code>INITIAL_REMINDER_DUE</code>, <code>FINAL_REMINDER_DUE</code>)</td><td><code>ignored:call_ended_no_active_stage_at_{state}</code></td></tr>
-    <tr><td><code>InboundSmsReceived</code></td><td>Outreach-shaped states (<code>CONTACTING_CUSTOMER</code>, <code>SLOT_PROPOSED</code>, <code>SLOT_PICKED</code>, <code>RESCHEDULING</code>) and both <code>*_REMINDER_SENT</code> states. The reducer classifies the body into either a vocabulary-matched transition or a free-text LLM reply.</td><td>Unchanged + <code>RecordEvent("case.inbound.unhandled")</code>; reason <code>inbound_unhandled_at_{state}</code>. <strong>Not</strong> an <code>ignored:*</code> decision — the audit row still fires.</td></tr>
+    <tr><td><code>CallEnded</code></td><td>Any state with a non-<code>None</code> <code>_stage_for_state</code> mapping (every active state except <code>BOOKED</code>, <code>INITIAL_REMINDER_DUE</code>, <code>FINAL_REMINDER_DUE</code>)</td><td><code>ignored:call_ended_no_active_stage_at_{state}</code></td></tr>
+    <tr><td><code>InboundSmsReceived</code></td><td>Outreach-shaped states (<code>CONTACTING_CUSTOMER</code>, <code>RESCHEDULING</code>) and both <code>*_REMINDER_SENT</code> states. The reducer classifies the body into either a vocabulary-matched transition or a free-text LLM reply.</td><td>Unchanged + <code>RecordEvent("case.inbound.unhandled")</code>; reason <code>inbound_unhandled_at_{state}</code>. <strong>Not</strong> an <code>ignored:*</code> decision — the audit row still fires.</td></tr>
     <tr><td><code>OutboundDispatched</code></td><td>Never transitions. Audit-only push from the outbound queue worker carrying <code>item_id</code>, real <code>twilio_sid</code>, and <code>to_phone</code>.</td><td>Unchanged + <code>RecordEvent("case.outbound.dispatched")</code>; reason <code>outbound_dispatched</code>.</td></tr>
   </tbody>
 </table>

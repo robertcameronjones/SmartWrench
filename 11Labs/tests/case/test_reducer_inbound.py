@@ -83,8 +83,6 @@ def _inbound(case: Case, body: str, sid: str = "SM_in_1") -> InboundSmsReceived:
     [
         CaseState.CREATED,
         CaseState.CONTACTING_CUSTOMER,
-        CaseState.SLOT_PROPOSED,
-        CaseState.SLOT_PICKED,
         CaseState.RESCHEDULING,
     ],
 )
@@ -92,7 +90,7 @@ def test_outreach_digit_books_picked_slot(state: CaseState) -> None:
     case = _case(state=state, slots=3)
     decision = decide_next_case_state(case, _inbound(case, "2"), now=NOW)
 
-    assert decision.next_state == CaseState.CONFIRMING_WITH_DEALER
+    assert decision.next_state == CaseState.BOOKED
     # Must request dealer confirmation for the picked slot AND emit one
     # PlaceCall for the LLM-composed ack the customer expects.
     confs = [a for a in decision.actions if isinstance(a, RequestDealerConfirmation)]
@@ -231,11 +229,10 @@ def test_final_reminder_free_text_keeps_state_and_replies() -> None:
 @pytest.mark.parametrize(
     "state",
     [
-        CaseState.CONFIRMING_WITH_DEALER,
+        CaseState.BOOKED,
         CaseState.INITIAL_REMINDER_DUE,
         CaseState.FINAL_REMINDER_DUE,
         CaseState.SHOWED,
-        CaseState.AWAITING_FEEDBACK,
     ],
 )
 def test_inbound_in_unhandled_state_records_audit_only(state: CaseState) -> None:

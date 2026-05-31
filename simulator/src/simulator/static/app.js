@@ -46,7 +46,6 @@ const INITIAL_REMINDER_FIRED = new Set([
   "final_reminder_due",
   "final_reminder_sent",
   "showed",
-  "awaiting_feedback",
 ]);
 
 // Case states in which the final (day-of) reminder has already been
@@ -54,7 +53,6 @@ const INITIAL_REMINDER_FIRED = new Set([
 const FINAL_REMINDER_FIRED = new Set([
   "final_reminder_sent",
   "showed",
-  "awaiting_feedback",
 ]);
 
 // ---------- utilities ----------------------------------------------------

@@ -38,7 +38,7 @@ class TestSqliteCaseRepository:
         repo = build_sqlite_case_repository(db_path=tmp_path / "cases.db")
         repo.save(sample_case(case_id="case_a"))
         repo.save(
-            sample_case(case_id="case_b").model_copy(update={"state": CaseState.BOOKED})
+            sample_case(case_id="case_b").model_copy(update={"state": CaseState.COMPLETED})
         )
         active = tuple(c.case_id for c in repo.list_active())
         assert active == ("case_a",)

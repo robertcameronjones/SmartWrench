@@ -291,7 +291,7 @@ async def test_dealer_rejection_kicks_to_rescheduling(
         await _settle(driver)
         # Dealer rejection triggers list_slots → RESCHEDULING, then a
         # second outreach call. After this whole chain the case lands
-        # back in CONFIRMING_WITH_DEALER (second booked) or
+        # back in BOOKED (second booked) or
         # FINAL_REMINDER_DUE/INITIAL_REMINDER_DUE if dealer accepts the replacement.
         # Since dealer is still rejecting and the script is exhausted,
         # we end up looping; the test only asserts the first rejection
